@@ -85,9 +85,9 @@ mod win {
         SDDL_REVISION_1,
     };
     use windows_sys::Win32::Security::{
-        EqualSid, GetTokenInformation, TokenUser, DACL_SECURITY_INFORMATION,
+        EqualSid, GetTokenInformation, TokenOwner, TokenUser, DACL_SECURITY_INFORMATION,
         OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
-        SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER,
+        SECURITY_ATTRIBUTES, TOKEN_OWNER, TOKEN_QUERY, TOKEN_USER,
     };
     // OpenProcessToken lives under Threading, not Security. Caught by the
     // cross-check rather than on a rented Windows machine, which is the whole
@@ -142,6 +142,51 @@ mod win {
         // points inside it.
         let info = buf.as_ptr() as *const TOKEN_USER;
         let sid = unsafe { (*info).User.Sid };
+        Ok(copy_sid(sid))
+    }
+
+    /// This process's DEFAULT OWNER SID — the one Windows stamps on a kernel
+    /// object this process creates when the descriptor does not name one.
+    ///
+    /// It is not the user SID, and the difference is a whole class of bug. A
+    /// token running elevated has `BUILTIN\Administrators` (S-1-5-32-544) as
+    /// its default owner, so an agent started from an elevated session creates
+    /// a pipe owned by a GROUP rather than by the person who started it. On a
+    /// machine where the account is the built-in Administrator — which is what
+    /// a fresh VM usually is — every process is elevated and there is no
+    /// unelevated case to notice the difference from.
+    ///
+    /// Read here so the owner check below can tell that apart from a stranger
+    /// holding the name.
+    fn current_default_owner_sid() -> io::Result<Vec<u8>> {
+        let mut token: HANDLE = ptr::null_mut();
+        if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
+            return Err(last_error("opening this process's token"));
+        }
+
+        let mut needed: u32 = 0;
+        unsafe { GetTokenInformation(token, TokenOwner, ptr::null_mut(), 0, &mut needed) };
+        let mut buf = vec![0u8; needed.max(1) as usize];
+        let ok = unsafe {
+            GetTokenInformation(
+                token,
+                TokenOwner,
+                buf.as_mut_ptr() as *mut c_void,
+                needed,
+                &mut needed,
+            )
+        };
+        if ok == 0 {
+            let e = last_error("reading the token's default owner");
+            unsafe { CloseHandle(token) };
+            return Err(e);
+        }
+        unsafe { CloseHandle(token) };
+
+        // SAFETY: on success the buffer starts with a TOKEN_OWNER whose Owner
+        // points inside it.
+        let info = buf.as_ptr() as *const TOKEN_OWNER;
+        let sid = unsafe { (*info).Owner };
         Ok(copy_sid(sid))
     }
 
@@ -216,9 +261,26 @@ mod win {
         pub fn new() -> io::Result<OwnerOnly> {
             let sid = current_user_sid()?;
             let text = sid_to_string(sid.as_ptr() as *mut c_void)?;
+            // O: the owner, set rather than left to the token, and the
+            // reason it is set is a bug report. Without an O: the owner of a
+            // created object comes from the token's DEFAULT owner, which for an
+            // elevated token is BUILTIN\Administrators rather than the person.
+            // The client reads that owner back and compares it to the user SID
+            // (`assert_owned_by_this_user`), so on any machine where the app
+            // runs elevated — a fresh VM logged in as the built-in
+            // Administrator is the ordinary case — the agent created a pipe the
+            // shell then refused as a stranger's, and the operator saw
+            //
+            //     Agent Connection failed: something other than this user's
+            //     agent is holding the Fury pipe
+            //
+            // about the agent it had itself just started. Reported 09.09.2026.
+            // Naming the owner makes it the same SID however the process was
+            // started; setting it to one's own user SID needs no privilege.
+            //
             // D: the DACL. P: protected, so nothing is inherited into it.
             // A;;GA;;;<sid>: allow generic-all to that SID. SY: local SYSTEM.
-            let sddl = format!("D:P(A;;GA;;;{text})(A;;GA;;;SY)");
+            let sddl = format!("O:{text}D:P(A;;GA;;;{text})(A;;GA;;;SY)");
             // OICI on each entry: object- and container-inherit, so a file
             // created inside the data directory later gets the same DACL
             // without this code having to walk the tree.
@@ -358,14 +420,48 @@ mod win {
         }
 
         let ours = current_user_sid()?;
-        let same = unsafe { EqualSid(owner, ours.as_ptr() as *mut c_void) } != 0;
+        let mut same = unsafe { EqualSid(owner, ours.as_ptr() as *mut c_void) } != 0;
+
+        // The second accepted answer, and it is not a loosening of the check.
+        //
+        // An agent that named its own owner (see `OwnerOnly::new`) matches the
+        // line above. One that did not — an older build, still running, being
+        // talked to by a shell that has just been updated — is owned by
+        // whatever the token's DEFAULT owner was, which under elevation is
+        // BUILTIN\Administrators. Refusing that would be refusing this user's
+        // own agent, which is the bug this pair of changes is here to end.
+        //
+        // What it lets in is an object owned by a SID that THIS token also
+        // creates objects as. For an ordinary account that is the account
+        // itself and nothing changes. For an elevated one it is the
+        // Administrators group, whose members can take ownership of any object
+        // on the machine anyway — so a squatter who could produce this owner
+        // already had every power the check exists to deny. The account the
+        // module comment is about, a different and unprivileged one, still
+        // cannot.
+        if !same {
+            if let Ok(default_owner) = current_default_owner_sid() {
+                same = unsafe { EqualSid(owner, default_owner.as_ptr() as *mut c_void) } != 0;
+            }
+        }
+
+        // Read before the descriptor is freed, and only when it is about to be
+        // reported: the first version of this error named nobody, so the one
+        // person who hit it could say only that something was holding the pipe.
+        let held_by = if same {
+            String::new()
+        } else {
+            sid_to_string(owner).unwrap_or_else(|_| "an owner that could not be read".into())
+        };
         unsafe { LocalFree(psd as HLOCAL) };
 
         if !same {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
-                "something other than this user's agent is holding the Fury pipe — \
-                 refusing to talk to it",
+                format!(
+                    "something other than this user's agent is holding the Fury pipe \
+                     (it belongs to {held_by}) — refusing to talk to it"
+                ),
             ));
         }
         Ok(())

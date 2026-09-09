@@ -107,25 +107,70 @@ if ($CoreArchive) {
 $me = [System.Security.Principal.WindowsIdentity]::GetCurrent()
 $mySid = $me.User.Value
 
+# Whether this run is elevated, said out loud, because it decides what the run
+# is worth.
+#
+# An object's owner comes from the token's default owner, and that default is
+# the user when unelevated and BUILTIN\Administrators when elevated. So the
+# owner claim below only exercises the interesting case in an elevated shell:
+# unelevated it passes on code that is broken for every customer running as
+# administrator, which is what a fresh VM is. A green run in the wrong window
+# is how this was missed. Reporting it costs two lines and makes a PASS mean
+# something specific.
+$elevated = (New-Object System.Security.Principal.WindowsPrincipal($me)).IsInRole(
+    [System.Security.Principal.WindowsBuiltInRole]::Administrator)
+Write-Host "  running as : $($me.Name) ($mySid)"
+Write-Host "  elevated   : $elevated"
+if (-not $elevated) {
+    Write-Host "  WARNING: not elevated -- the pipe-owner claim cannot fail in this window." -ForegroundColor Yellow
+    Write-Host "           Run this again from an elevated PowerShell before trusting a PASS." -ForegroundColor Yellow
+}
+
 $agent = $null
 try {
     # -----------------------------------------------------------------------
     Write-Host "`nthe agent listens, and on a pipe rather than a port"
     # -----------------------------------------------------------------------
+    # Every fury-* pipe that exists BEFORE the agent starts, so the one it
+    # creates can be told from one that was already there.
+    #
+    # This script used to take the first fury-* pipe it found and call it the
+    # agent's. The comment above the loop said the name was derived from the
+    # data directory rather than guessed, and it was not: the code guessed, and
+    # on a machine with any other agent running it guessed wrong. The build
+    # server had one that had been up since 17.08.2026, so every run since then
+    # inspected a month-old process instead of the binary under test, and the
+    # DACL claims below were true of something nobody had built that day.
+    #
+    # Found 09.09.2026 by running the script against a deliberately BROKEN
+    # build, expecting a red line and getting PASS. A check that cannot fail is
+    # not a check, and this one could not, which is how a real defect in the
+    # owner of the pipe reached a user.
+    #
+    # Matching by "appeared after we started" rather than by recomputing the
+    # tag on purpose: the address is SHA-256 over the data directory, and a
+    # second copy of that arithmetic in PowerShell is a copy that drifts from
+    # the Rust one. The agent's own `dirs::short_tag` stays the only definition.
+    $before = @(Get-ChildItem \\.\pipe\ -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -like 'fury-*' } |
+                Select-Object -ExpandProperty Name)
+    if ($before.Count -gt 0) {
+        Write-Host ("  note: " + $before.Count + " fury-* pipe(s) already present, ignoring: " + ($before -join ', '))
+    }
+
     $agent = Start-Process -FilePath $agentExe -ArgumentList 'serve' -PassThru `
         -WindowStyle Hidden -RedirectStandardOutput (Join-Path $home_ 'out.log') `
         -RedirectStandardError (Join-Path $home_ 'err.log')
 
-    # The tag is eight hex characters of SHA-256 over the data directory; the
-    # name is derived rather than guessed so this checks the real one.
     $pipe = $null
     for ($i = 0; $i -lt 100; $i++) {
         Start-Sleep -Milliseconds 200
         $pipe = Get-ChildItem \\.\pipe\ -ErrorAction SilentlyContinue |
-                Where-Object { $_.Name -like 'fury-*' } | Select-Object -First 1
+                Where-Object { $_.Name -like 'fury-*' -and $before -notcontains $_.Name } |
+                Select-Object -First 1
         if ($pipe) { break }
     }
-    Claim ($null -ne $pipe) "a named pipe called fury-* exists"
+    Claim ($null -ne $pipe) "a NEW named pipe called fury-* exists -- one this run created, not one already on the machine"
     if (-not $pipe) { throw "the agent never listened -- see $home_\err.log" }
 
     $pipePath = "\\.\pipe\" + $pipe.Name
@@ -180,6 +225,28 @@ try {
 
     Claim ($sddl -match '^[OGD]?.*D:P') `
         "the DACL is PROTECTED (D:P) -- without it the parent's inheritable entries come back"
+
+    # The claim this script did not make, and the one whose absence cost a user
+    # their afternoon on 09.09.2026.
+    #
+    # The shell does not merely open the pipe: it reads the OWNER back off it
+    # and hangs up unless that owner is this user, because a pipe name is
+    # machine-wide and a squatter wins the name before the agent ever runs
+    # (`perms::assert_owned_by_this_user`). Everything above this line was about
+    # the DACL, and the DACL was always right. The owner was printed in the sddl
+    # line and asserted nowhere, so the one branch that can refuse a healthy
+    # agent was the one branch never exercised on a real machine.
+    #
+    # It refused. An object's owner comes from the token's DEFAULT owner unless
+    # the descriptor names one, and an elevated token's default owner is
+    # BUILTIN\Administrators -- so on a machine running as the built-in
+    # Administrator, which is what a fresh VM is, the agent created a pipe the
+    # shell then rejected as a stranger's. Run this script elevated and it now
+    # fails; that is the point of it.
+    $pipeOwner = $pipeSec.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+    Claim ($pipeOwner -eq $mySid) `
+        "the pipe is OWNED by this user ($mySid), not merely readable by them -- got $pipeOwner"
+
 
     # -----------------------------------------------------------------------
     Write-Host "`nthe shell's half of the conversation works"
