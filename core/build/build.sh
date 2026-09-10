@@ -118,21 +118,37 @@ case "$TARGET" in
   *) echo "!! Unknown target: $TARGET" >&2; exit 1 ;;
 esac
 
-# A 16 GB machine cannot survive an official (ThinLTO) build. Say so before
-# burning four hours, not after the linker gets OOM-killed.
+ARGS_FILE="$CORE_DIR/args/$TARGET.gn"
+[ -f "$ARGS_FILE" ] || { echo "!! Missing $ARGS_FILE" >&2; exit 1; }
+
+# A 16 GB machine cannot survive a ThinLTO link. Say so before burning four
+# hours, not after the linker gets OOM-killed.
+#
+# Asks the ARGS, not the target's name, and that is a fix. The old test was
+# `$ram_gb -lt 24` and "the name does not contain lowmem", which refused
+# macos-arm64-16gb -- the file written specifically to be buildable here, with
+# is_official_build = true, PGO kept, and use_thin_lto = false on line 144. It
+# then suggested "$TARGET-lowmem", a name it built by concatenation and never
+# checked: core/args/macos-arm64-16gb-lowmem.gn does not exist and never did.
+# So the advice was to run a config that cannot load, instead of the one already
+# sitting there for exactly this machine. Measured 10.09.2026 on an M5/16 GB.
 if [ "$(uname -s)" = "Darwin" ]; then
   ram_gb=$(( $(sysctl -n hw.memsize) / 1073741824 ))
-  if [ "$ram_gb" -lt 24 ] && [ "${TARGET#*lowmem}" = "$TARGET" ]; then
-    echo "!! This machine has ${ram_gb} GB RAM. An official build enables ThinLTO," >&2
-    echo "!! and a single LTO link can hold 8-16 GB. Use the low-memory config:" >&2
-    echo "!!   $0 ${TARGET}-lowmem" >&2
+  lto_on=1
+  grep -qE '^[[:space:]]*use_thin_lto[[:space:]]*=[[:space:]]*false' "$ARGS_FILE" && lto_on=0
+  grep -qE '^[[:space:]]*is_official_build[[:space:]]*=[[:space:]]*true' "$ARGS_FILE" || lto_on=0
+  if [ "$ram_gb" -lt 24 ] && [ "$lto_on" = 1 ]; then
+    echo "!! This machine has ${ram_gb} GB RAM and $TARGET links with ThinLTO," >&2
+    echo "!! which holds 8-16 GB for a single link. Configs that build here:" >&2
+    for alt in "$CORE_DIR"/args/"${TARGET%%-*}"-*.gn "$CORE_DIR"/args/*lowmem.gn; do
+      [ -f "$alt" ] || continue
+      grep -qE '^[[:space:]]*use_thin_lto[[:space:]]*=[[:space:]]*false|^[[:space:]]*is_official_build[[:space:]]*=[[:space:]]*false' "$alt" || continue
+      echo "!!   $0 $(basename "${alt%.gn}")" >&2
+    done
     echo "!! Override with FORCE=1 if you know what you are doing." >&2
     [ "${FORCE:-0}" = "1" ] || exit 1
   fi
 fi
-
-ARGS_FILE="$CORE_DIR/args/$TARGET.gn"
-[ -f "$ARGS_FILE" ] || { echo "!! Missing $ARGS_FILE" >&2; exit 1; }
 
 mkdir -p "$SRC/$OUT"
 cp "$ARGS_FILE" "$SRC/$OUT/args.gn"

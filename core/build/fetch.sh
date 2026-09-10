@@ -113,7 +113,17 @@ git -C "$SRC" fetch --depth 1 origin "refs/tags/$CHROMIUM_VERSION"
 # discarding somebody's edits is not this script's call to make. The series is
 # regenerable from core/patches and the icons from core/build/link-icons.sh, so
 # the fix is one line -- but it is the caller who runs it.
-if [ -n "$(git -C "$SRC" status --porcelain)" ]; then
+# --ignore-submodules=all and no untracked files, because neither is evidence of
+# anybody's work. Chromium tracks its dependencies as submodules and gclient
+# moves those gitlinks to the DEPS-pinned revisions, so a HEALTHY tree that has
+# just synced shows forty-odd modified entries; untracked content under
+# third_party/ is what the sync materialises. Counting either would make this
+# refuse to run a second time on a tree it produced itself -- measured
+# 10.09.2026, resuming a sync that a 429 had interrupted.
+#
+# What is left is what it means to ask about: an edited source file, which is
+# either the applied patch series or somebody's work in progress.
+if [ -n "$(git -C "$SRC" status --porcelain --untracked-files=no --ignore-submodules=all)" ]; then
   echo "!! $SRC has local changes. If they are only the applied patch series," >&2
   echo "!! and core/build/apply.sh can put them back, clear it with:" >&2
   echo >&2
@@ -154,7 +164,30 @@ for attempt in 1 2 3 4 5 6 7 8 9 10; do
 done
 
 echo "==> gclient sync (this is the slow part)"
-(cd "$CORE_DIR" && "$GCLIENT" sync --with_branch_heads --with_tags -D --no-history)
+
+# Retried, because the common failure here is not ours and not permanent.
+# chromium.googlesource.com rate-limits anonymous fetches, and a sync that pulls
+# a few hundred dependencies trips it:
+#
+#   remote: RESOURCE_EXHAUSTED ... "Short term server-time rate limit exceeded"
+#   fatal: ... libphonenumber.git ...: The requested URL returned error: 429
+#
+# Measured 10.09.2026 on the macOS 153 sync, fourteen minutes in. gclient sync
+# is resumable -- what it already has it keeps -- so the answer is to wait and
+# ask again rather than to start over. Backs off 60s, 120s, 240s, 480s.
+sync_attempt=1
+delay=60
+until (cd "$CORE_DIR" && "$GCLIENT" sync --with_branch_heads --with_tags -D --no-history); do
+  if [ "$sync_attempt" -ge 5 ]; then
+    echo "!! gclient sync failed 5 times. The last error is above; if it is a 429" >&2
+    echo "!! the limit is per-hour and waiting longer is the fix, not a flag." >&2
+    exit 1
+  fi
+  echo "==> sync attempt $sync_attempt failed; waiting ${delay}s and resuming"
+  sleep "$delay"
+  sync_attempt=$((sync_attempt + 1))
+  delay=$((delay * 2))
+done
 
 # Record what we are pinned to, so apply.sh and CI agree.
 echo "$CHROMIUM_VERSION" > "$CORE_DIR/CHROMIUM_VERSION"
