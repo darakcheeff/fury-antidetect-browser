@@ -26,6 +26,26 @@ enable_remoting = false
 #                          # unresolvable. Needs source patches — see patch 0901.
 enable_hangout_services_extension = false
 
+# MEASURED FALSE ON WINDOWS, 10.09.2026 — the note in macos-arm64-16gb.gn says a
+# build with this off still answers requestMediaKeySystemAccess correctly once
+# agent/src/widevine.rs has staged the blob. On Windows it does not.
+#
+# The staging works: 22,970,008 bytes land in core.bundle/Fury/WidevineCdm from
+# the Chrome installed on the machine. The browser still refuses. Asked through
+# a profile launched by the agent, with that CDM in place:
+#
+#   com.widevine.alpha  NotSupportedError: Unsupported keySystem or
+#                       supportedConfigurations
+#   org.w3.clearkey     available
+#
+# and real Chrome 153.0.8010.37 on the same machine, same probe, answers
+# available for both. So this is not the probe and not a missing file: the
+# support is not registered in a build made with the flag off.
+#
+# That costs the gate's Widevine check, and it costs every profile Netflix,
+# Spotify and Disney+. The fix to try is enable_widevine = true here — the
+# support code is open, only the blob is not, and the blob still arrives at
+# runtime rather than in the repository. It needs a full rebuild to confirm.
 enable_widevine = false
 
 # enable_nacl was removed upstream by M150; setting it only produces a warning

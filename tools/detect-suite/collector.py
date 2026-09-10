@@ -81,12 +81,36 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.send_error(413, "dump missing or absurdly large")
             return
 
+        raw = self.rfile.read(length)
+
+        # Some clients leave the header block's terminating CRLF in the stream,
+        # so a read of exactly Content-Length starts two bytes early and ends
+        # two bytes short -- a body that is complete on the wire arrives as
+        # `\r\n{...` with its last brace missing, and json fails at the final
+        # character with "Expecting ',' delimiter". That reads exactly like
+        # truncation and is not. Measured 10.09.2026 on a Fury profile posting
+        # through the relay; the same POST direct from a bare browser is clean.
+        body = raw.lstrip(b"\r\n")
+        if len(body) < length:
+            body += self.rfile.read(length - len(body))
+        raw = body
+
         try:
-            payload = json.loads(self.rfile.read(length))
+            payload = json.loads(raw)
             name = payload["name"]
             dump = payload["dump"]
         except (ValueError, KeyError, TypeError) as exc:
-            self.send_error(400, f"expected {{name, dump}}: {exc}")
+            # Keep the body that failed. A 400 that discards it leaves a capture
+            # that "did not answer" and nothing to look at -- the browser has
+            # already been closed by the time anyone reads the log, and the dump
+            # cannot be produced again without another launch.
+            evidence = BASELINES / "_rejected_body.bin"
+            evidence.write_bytes(raw)
+            self.send_error(
+                400,
+                f"expected {{name, dump}}: {exc} "
+                f"({len(raw)} of {length} bytes read, kept in {evidence.name})",
+            )
             return
 
         # The name comes from the page, so treat it as untrusted: no traversal,

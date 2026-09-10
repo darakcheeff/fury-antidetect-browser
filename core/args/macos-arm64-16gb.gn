@@ -82,6 +82,13 @@ enable_hangout_services_extension = false
 # these args therefore answers requestMediaKeySystemAccess the way real Chrome
 # does, on any machine that has Chrome.
 #
+# NOT CONFIRMED, and the Windows build disproves it there: with the CDM staged
+# and a profile launched by the agent, Windows still answers
+# NotSupportedError while real Chrome on the same machine answers available.
+# See the note at enable_widevine in core/args/windows-x64.gn. Whether macOS
+# behaves differently has not been measured since; do not rely on this
+# paragraph until it has.
+#
 # What is still true: a machine with NO Chrome installed gets a browser with no
 # CDM, which fails the gate's Widevine check. That is a detectable browser and a
 # working one, and it is the right trade — the alternative is refusing to start.
