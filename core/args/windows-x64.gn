@@ -43,10 +43,15 @@ enable_hangout_services_extension = false
 # support is not registered in a build made with the flag off.
 #
 # That costs the gate's Widevine check, and it costs every profile Netflix,
-# Spotify and Disney+. The fix to try is enable_widevine = true here — the
-# support code is open, only the blob is not, and the blob still arrives at
-# runtime rather than in the repository. It needs a full rebuild to confirm.
-enable_widevine = false
+# Spotify and Disney+.
+#
+# So it is ON here, from 10.09.2026. What that changes is only whether the
+# SUPPORT is compiled in: the CDM itself is still not in this repository, not in
+# a release and not in an installer — agent/src/widevine.rs copies the one the
+# user's own Chrome is already licensed to have, at agent startup, into the
+# layout Chromium looks in. bundle_widevine_cdm stays off for exactly that
+# reason. See docs/10 for why the blob may not travel with us.
+enable_widevine = true
 
 # enable_nacl was removed upstream by M150; setting it only produces a warning
 enable_print_preview = true
