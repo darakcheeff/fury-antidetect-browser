@@ -351,7 +351,7 @@ mod tests {
         std::fs::remove_dir_all(&root).ok();
 
         // An archive with a wrapping directory, which is the commoner shape.
-        let nested = root.join("fury-core-150.0.7871.187");
+        let nested = root.join("fury-core-153.0.8010.37");
         let leaf = nested.join(super::super::core_leaf());
         std::fs::create_dir_all(leaf.parent().unwrap()).unwrap();
         std::fs::write(&leaf, b"#!/bin/sh\n").unwrap();

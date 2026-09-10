@@ -139,7 +139,16 @@ if ! python3 - "$TMP" "$PATCHES" "$NAME" <<'CHECK'
 import pathlib, re, sys
 
 out, patches, name = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), sys.argv[3]
-text = out.read_text()
+
+# Both reads name their encoding, and that is not decoration. read_text() with
+# no encoding uses the platform default, which is UTF-8 on macOS and cp1252 on
+# the Windows build box -- where refresh.sh died with a UnicodeDecodeError on
+# byte 0x90 of a patch, mid-rebase, reporting only "refresh failed". errors=
+# "replace" because this check reads structure, not content: a byte it cannot
+# decode must not stop it from seeing which files a patch creates.
+READ = {"encoding": "utf-8", "errors": "replace"}
+
+text = out.read_text(**READ)
 
 # Files this refresh would create outright.
 created = set()
@@ -153,7 +162,7 @@ clashes = []
 for other in sorted(patches.glob("*.patch")):
     if other.stem == name:
         continue
-    o = other.read_text()
+    o = other.read_text(**READ)
     for chunk in o.split("diff --git ")[1:]:
         lines = chunk.splitlines()
         if len(lines) > 1 and lines[1].startswith("new file mode"):

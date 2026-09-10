@@ -11,7 +11,7 @@ index 847ba42327..9d9043cc94 100644
      "//components/content_settings/core/browser",
      "//components/content_settings/core/browser:cookie_settings",
 diff --git a/components/embedder_support/user_agent_utils.cc b/components/embedder_support/user_agent_utils.cc
-index 608bea5cb3..737f7e518c 100644
+index 3f87ec84fb..35e57fbbeb 100644
 --- a/components/embedder_support/user_agent_utils.cc
 +++ b/components/embedder_support/user_agent_utils.cc
 @@ -4,6 +4,8 @@
@@ -42,7 +42,7 @@ index 608bea5cb3..737f7e518c 100644
    std::optional<std::string> custom_ua = GetUserAgentFromCommandLine();
    if (custom_ua.has_value()) {
      return custom_ua.value();
-@@ -634,6 +648,82 @@ std::string GetPlatformForUAMetadata() {
+@@ -645,6 +659,82 @@ std::string GetPlatformForUAMetadata() {
  #endif
  }
  
@@ -125,7 +125,7 @@ index 608bea5cb3..737f7e518c 100644
  blink::UserAgentMetadata GetUserAgentMetadata(bool only_low_entropy_ch) {
    blink::UserAgentMetadata metadata;
  
-@@ -657,6 +747,7 @@ blink::UserAgentMetadata GetUserAgentMetadata(bool only_low_entropy_ch) {
+@@ -668,6 +758,7 @@ blink::UserAgentMetadata GetUserAgentMetadata(bool only_low_entropy_ch) {
    }
  
    if (only_low_entropy_ch) {
@@ -133,7 +133,7 @@ index 608bea5cb3..737f7e518c 100644
      return metadata;
    }
  
-@@ -670,6 +761,7 @@ blink::UserAgentMetadata GetUserAgentMetadata(bool only_low_entropy_ch) {
+@@ -681,6 +772,7 @@ blink::UserAgentMetadata GetUserAgentMetadata(bool only_low_entropy_ch) {
    metadata.bitness = GetCpuBitness();
    metadata.wow64 = IsWoW64();
    metadata.platform_version = GetPlatformVersion();

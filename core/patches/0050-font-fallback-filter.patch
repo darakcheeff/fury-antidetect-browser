@@ -1,21 +1,16 @@
 diff --git a/third_party/blink/renderer/platform/fonts/font_cache.cc b/third_party/blink/renderer/platform/fonts/font_cache.cc
-index 506b181809..711e10ecad 100644
+index 636e2ca661..6eafb70e6c 100644
 --- a/third_party/blink/renderer/platform/fonts/font_cache.cc
 +++ b/third_party/blink/renderer/platform/fonts/font_cache.cc
-@@ -29,6 +29,12 @@
- 
- #include "third_party/blink/renderer/platform/fonts/font_cache.h"
- 
-+#include <set>
-+#include <string>
-+#include <string_view>
-+
+@@ -45,6 +45,7 @@
+ #include "base/trace_event/process_memory_dump.h"
+ #include "base/trace_event/trace_event.h"
+ #include "build/build_config.h"
 +#include "components/fury/fury_config.h"
-+
- #include <limits>
- #include <memory>
- 
-@@ -146,10 +152,135 @@ void FontCache::AcceptLanguagesChanged(const String& accept_languages) {
+ #include "skia/ext/font_utils.h"
+ #include "third_party/blink/public/common/features.h"
+ #include "third_party/blink/public/platform/platform.h"
+@@ -173,10 +174,135 @@ void FontCache::AcceptLanguagesChanged(const String& accept_languages) {
    LayoutLocale::AcceptLanguagesChanged(accept_languages);
  }
  
@@ -152,7 +147,7 @@ index 506b181809..711e10ecad 100644
            font_description,
            FontFaceCreationParams(
 diff --git a/third_party/blink/renderer/platform/fonts/font_fallback_list.cc b/third_party/blink/renderer/platform/fonts/font_fallback_list.cc
-index c38cf414f9..4ecc8440cd 100644
+index a35f4d61b2..447671f34c 100644
 --- a/third_party/blink/renderer/platform/fonts/font_fallback_list.cc
 +++ b/third_party/blink/renderer/platform/fonts/font_fallback_list.cc
 @@ -28,6 +28,8 @@

@@ -50,7 +50,7 @@ index 643d833935..85f3066853 100644
    // iframes. This should be reflected in calls getting permission status.
    //
 diff --git a/third_party/blink/renderer/modules/permissions/permissions.cc b/third_party/blink/renderer/modules/permissions/permissions.cc
-index 7dfb580705..a8a8af242e 100644
+index e36c344035..8d42a3d2cb 100644
 --- a/third_party/blink/renderer/modules/permissions/permissions.cc
 +++ b/third_party/blink/renderer/modules/permissions/permissions.cc
 @@ -4,6 +4,8 @@
@@ -62,7 +62,7 @@ index 7dfb580705..a8a8af242e 100644
  #include <memory>
  #include <utility>
  
-@@ -262,6 +264,43 @@ void Permissions::ServiceConnectionError() {
+@@ -268,6 +270,43 @@ void Permissions::ServiceConnectionError() {
    service_.reset();
  }
  
@@ -106,7 +106,7 @@ index 7dfb580705..a8a8af242e 100644
  void Permissions::TaskComplete(
      ScriptPromiseResolver<PermissionStatus>* resolver,
      mojom::blink::PermissionDescriptorPtr descriptor,
-@@ -270,6 +309,49 @@ void Permissions::TaskComplete(
+@@ -276,6 +315,49 @@ void Permissions::TaskComplete(
        resolver->GetExecutionContext()->IsContextDestroyed())
      return;
  

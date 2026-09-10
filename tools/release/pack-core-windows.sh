@@ -80,8 +80,26 @@ dirs=(locales resources MEIPreload angledata PrivacySandboxAttestationsPreloaded
 #
 # which names no file and sends you to sxstrace. Measured 16.08.2026 -- it cost
 # one packing round and was found by a probe that looked like it had hung.
-manifest="$(ls -1 *.*.*.*.manifest 2>/dev/null | head -1)"
-[ -n "$manifest" ] || { echo "!! no <version>.manifest in the build output" >&2; exit 1; }
+# Picked by NAME, not by `ls | head -1`, and that is a fix rather than a style
+# preference. out/ is never cleaned between builds -- that is deliberate, it is
+# the ccache -- so after a rebase it holds one manifest per version ever built
+# there. `head -1` takes the alphabetically first, which after 150 -> 153 was
+# 150.0.7871.187.manifest: a 153 chrome.exe shipped with the manifest of a
+# version it is not. It installs, it packs, and then it refuses to start with
+#
+#     side-by-side configuration is incorrect  (os error 14001)
+#
+# which names no file. Measured 09.09.2026 by verify-windows.ps1, on the first
+# core packed out of a rebased tree.
+want="$(cat "$here/core/CHROMIUM_VERSION" 2>/dev/null)"
+[ -n "$want" ] || { echo "!! core/CHROMIUM_VERSION is empty -- cannot tell which manifest belongs to this build" >&2; exit 1; }
+manifest="$want.manifest"
+if [ ! -f "$manifest" ]; then
+  echo "!! no $manifest in the build output. Found:" >&2
+  ls -1 *.*.*.*.manifest 2>/dev/null | sed 's/^/     /' >&2 || echo "     (none)" >&2
+  echo "!! The build output and core/CHROMIUM_VERSION disagree; rebuild or fix the pin." >&2
+  exit 1
+fi
 files+=("$manifest")
 
 missing=0

@@ -56,7 +56,7 @@ Fury — это **две загрузки**, и об этом стоит зна�
 раз и проверяет, что он стартует**. Если напечаталась версия, ядро установлено:
 
 ```
-installed Fury 150.0.7871.187
+installed Fury 153.0.8010.37
   /Users/you/Library/Application Support/Fury/core.bundle/Fury.app/Contents/MacOS/Fury
 ```
 

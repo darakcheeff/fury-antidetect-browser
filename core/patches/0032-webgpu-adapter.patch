@@ -1,5 +1,5 @@
 diff --git a/third_party/blink/renderer/modules/webgpu/gpu_adapter.cc b/third_party/blink/renderer/modules/webgpu/gpu_adapter.cc
-index 4e4ca8dcb4..d9a33a45a2 100644
+index 5d35a355c7..1f43c80769 100644
 --- a/third_party/blink/renderer/modules/webgpu/gpu_adapter.cc
 +++ b/third_party/blink/renderer/modules/webgpu/gpu_adapter.cc
 @@ -4,6 +4,10 @@
@@ -13,7 +13,7 @@ index 4e4ca8dcb4..d9a33a45a2 100644
  #include "services/metrics/public/cpp/ukm_builders.h"
  #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
  #include "third_party/blink/renderer/bindings/core/v8/v8_object_builder.h"
-@@ -34,6 +38,18 @@ GPUSupportedFeatures* MakeFeatureNameSet(wgpu::Adapter adapter) {
+@@ -35,6 +39,18 @@ GPUSupportedFeatures* MakeFeatureNameSet(wgpu::Adapter adapter) {
    GPUSupportedFeatures* features = MakeGarbageCollected<GPUSupportedFeatures>();
    DCHECK(features->FeatureNameSet().empty());
  
@@ -32,7 +32,7 @@ index 4e4ca8dcb4..d9a33a45a2 100644
    wgpu::SupportedFeatures supported_features;
    adapter.GetFeatures(&supported_features);
    // SAFETY: Required from caller
-@@ -43,8 +59,21 @@ GPUSupportedFeatures* MakeFeatureNameSet(wgpu::Adapter adapter) {
+@@ -44,8 +60,21 @@ GPUSupportedFeatures* MakeFeatureNameSet(wgpu::Adapter adapter) {
      auto feature_name_enum_optional =
          GPUSupportedFeatures::ToV8FeatureNameEnum(f);
      if (feature_name_enum_optional) {
@@ -56,7 +56,7 @@ index 4e4ca8dcb4..d9a33a45a2 100644
        }
    }
    return features;
-@@ -125,13 +154,36 @@ GPUAdapter::GPUAdapter(
+@@ -126,13 +155,36 @@ GPUAdapter::GPUAdapter(
  GPUAdapterInfo* GPUAdapter::CreateAdapterInfoForAdapter() {
    bool is_fallback_adapter = adapter_type_ == wgpu::AdapterType::CPU;
  
@@ -95,7 +95,7 @@ index 4e4ca8dcb4..d9a33a45a2 100644
          FromDawnEnum(backend_type_), FromDawnEnum(adapter_type_),
          d3d_shader_model_, vk_driver_version_, FromDawnEnum(power_preference_));
  
-@@ -144,7 +196,7 @@ GPUAdapterInfo* GPUAdapter::CreateAdapterInfoForAdapter() {
+@@ -145,7 +197,7 @@ GPUAdapterInfo* GPUAdapter::CreateAdapterInfoForAdapter() {
      }
    } else {
      info = MakeGarbageCollected<GPUAdapterInfo>(

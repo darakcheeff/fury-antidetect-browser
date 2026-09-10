@@ -1,8 +1,8 @@
 diff --git a/chrome/browser/bookmarks/BUILD.gn b/chrome/browser/bookmarks/BUILD.gn
-index d3b49a390c..e2992b0759 100644
+index edd4475ea0..63d2b961b8 100644
 --- a/chrome/browser/bookmarks/BUILD.gn
 +++ b/chrome/browser/bookmarks/BUILD.gn
-@@ -57,6 +57,7 @@ source_set("impl") {
+@@ -58,6 +58,7 @@ source_set("impl") {
    public_deps = [ "//chrome/browser:browser_public_dependencies" ]
  
    deps = [
@@ -40,10 +40,10 @@ index e5fb1fd803..3974083d3f 100644
    if (profile->GetUserData(kBookmarkFaviconFetcherKey)) {
      return;
 diff --git a/chrome/browser/extensions/BUILD.gn b/chrome/browser/extensions/BUILD.gn
-index e0eeeb2caf..d7c9dd691c 100644
+index 1046137d6a..774494089a 100644
 --- a/chrome/browser/extensions/BUILD.gn
 +++ b/chrome/browser/extensions/BUILD.gn
-@@ -581,6 +581,7 @@ source_set("extensions") {
+@@ -583,6 +583,7 @@ source_set("extensions") {
      "//components/enterprise/browser/identifiers",
      "//components/enterprise/browser/promotion",
      "//components/favicon/content",
@@ -52,7 +52,7 @@ index e0eeeb2caf..d7c9dd691c 100644
      "//components/guest_view/common",
      "//components/infobars/content",
 diff --git a/chrome/browser/extensions/api/passwords_private/passwords_private_delegate_impl.cc b/chrome/browser/extensions/api/passwords_private/passwords_private_delegate_impl.cc
-index 1ccdb3ca3f..bc0322ed81 100644
+index dea7e79766..d81a575620 100644
 --- a/chrome/browser/extensions/api/passwords_private/passwords_private_delegate_impl.cc
 +++ b/chrome/browser/extensions/api/passwords_private/passwords_private_delegate_impl.cc
 @@ -4,6 +4,9 @@
@@ -65,10 +65,10 @@ index 1ccdb3ca3f..bc0322ed81 100644
  #include <memory>
  #include <optional>
  #include <string>
-@@ -599,6 +602,16 @@ void PasswordsPrivateDelegateImpl::RequestPlaintextPassword(
+@@ -579,6 +582,16 @@ void PasswordsPrivateDelegateImpl::RequestPlaintextPassword(
+     int id,
      api::passwords_private::PlaintextReason reason,
-     PlaintextPasswordCallback callback,
-     content::WebContents* web_contents) {
+     PlaintextPasswordCallback callback) {
 +  // Patch 0303, and the reason blocking the CSV export alone is not enough.
 +  // Reading credentials out one at a time is the same leak as exporting them in
 +  // a batch, only slower, and this path is reachable from chrome://settings
@@ -80,43 +80,52 @@ index 1ccdb3ca3f..bc0322ed81 100644
 +  }
 +
    AuthenticateUser(
-       web_contents, kPasswordManagerAuthValidity, GetReauthPurpose(reason),
+       kPasswordManagerAuthValidity, GetReauthPurpose(reason),
        base::BindOnce(
 diff --git a/chrome/browser/ui/passwords/settings/BUILD.gn b/chrome/browser/ui/passwords/settings/BUILD.gn
-index 602ed6a77b..7593c1121c 100644
+index a3c75c684f..9414423331 100644
 --- a/chrome/browser/ui/passwords/settings/BUILD.gn
 +++ b/chrome/browser/ui/passwords/settings/BUILD.gn
-@@ -23,6 +23,7 @@ source_set("settings") {
- source_set("impl") {
-   sources = [ "password_manager_porter.cc" ]
+@@ -28,6 +28,7 @@ source_set("impl") {
+     "password_import_controller.cc",
+   ]
    deps = [
 +    "//components/fury",
      ":settings",
+     "//chrome/browser:primitives",
      "//chrome/browser/profiles:profile",
-     "//chrome/browser/ui/select_file_policy",
-diff --git a/chrome/browser/ui/passwords/settings/password_manager_porter.cc b/chrome/browser/ui/passwords/settings/password_manager_porter.cc
-index d1c942949a..f65d8b8c19 100644
---- a/chrome/browser/ui/passwords/settings/password_manager_porter.cc
-+++ b/chrome/browser/ui/passwords/settings/password_manager_porter.cc
-@@ -4,6 +4,9 @@
- 
- #include "chrome/browser/ui/passwords/settings/password_manager_porter.h"
- 
-+#include "base/command_line.h"
-+#include "components/fury/fury_switches.h"
-+
- #include <string>
+diff --git a/chrome/browser/ui/passwords/settings/password_export_controller.cc b/chrome/browser/ui/passwords/settings/password_export_controller.cc
+index db12febfa3..ba5a4b901e 100644
+--- a/chrome/browser/ui/passwords/settings/password_export_controller.cc
++++ b/chrome/browser/ui/passwords/settings/password_export_controller.cc
+@@ -8,6 +8,7 @@
  #include <vector>
  
-@@ -61,6 +64,16 @@ PasswordManagerPorter::~PasswordManagerPorter() {
+ #include "base/check.h"
++#include "base/command_line.h"
+ #include "base/functional/bind.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/path_service.h"
+@@ -19,6 +20,7 @@
+ #include "chrome/browser/ui/select_file_policy/chrome_select_file_policy.h"
+ #include "chrome/common/chrome_paths.h"
+ #include "chrome/grit/branded_strings.h"
++#include "components/fury/fury_switches.h"
+ #include "components/password_manager/core/browser/export/password_manager_exporter.h"
+ #include "components/password_manager/core/browser/ui/saved_passwords_presenter.h"
+ #include "components/strings/grit/components_strings.h"
+@@ -66,6 +68,19 @@ PasswordExportController::~PasswordExportController() {
+ }
  
- bool PasswordManagerPorter::Export(
-     base::WeakPtr<content::WebContents> web_contents) {
+ bool PasswordExportController::Export(content::WebContents* web_contents) {
 +  // Patch 0303. At the function that does the work, not at the button that
 +  // starts it: the settings page reaches this over Mojo, and a message replayed
-+  // by hand — or an extension holding the passwordsPrivate permission — reaches
-+  // it without any button at all. Hiding the button would demo perfectly and
-+  // protect nothing.
++  // by hand -- or an extension holding the passwordsPrivate permission --
++  // reaches it without any button at all. Hiding the button would demo
++  // perfectly and protect nothing.
++  //
++  // Lived in PasswordManagerPorter::Export until 153, where upstream split the
++  // porter into an export and an import controller.
 +  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
 +          fury::switches::kLockDataExport)) {
 +    return false;
@@ -126,10 +135,10 @@ index d1c942949a..f65d8b8c19 100644
                         password_manager::ExportProgressStatus::kInProgress) {
      return false;
 diff --git a/components/fury/fury_switches.cc b/components/fury/fury_switches.cc
-index 65b3ca1..292084b 100644
+index c42d598a2c..32ac0fc6d0 100644
 --- a/components/fury/fury_switches.cc
 +++ b/components/fury/fury_switches.cc
-@@ -14,6 +14,7 @@ const char kFingerprintHandle[] = "fury-fp-handle";
+@@ -15,6 +15,7 @@ const char kFingerprintHandle[] = "fury-fp-handle";
  // so verify-0302.py launches with the Rust spelling and asserts the browser
  // refuses — a drifted name would otherwise fail silently and forever.
  const char kLockDevTools[] = "fury-lock-devtools";
@@ -138,10 +147,10 @@ index 65b3ca1..292084b 100644
  }  // namespace switches
  }  // namespace fury
 diff --git a/components/fury/fury_switches.h b/components/fury/fury_switches.h
-index e26f94e..cff2456 100644
+index 11ff6d3386..9400652a6a 100644
 --- a/components/fury/fury_switches.h
 +++ b/components/fury/fury_switches.h
-@@ -44,6 +44,15 @@ COMPONENT_EXPORT(FURY) extern const char kFingerprintHandle[];
+@@ -56,6 +56,15 @@ COMPONENT_EXPORT(FURY) extern const char kFingerprintHandle[];
  // machine.
  COMPONENT_EXPORT(FURY) extern const char kLockDevTools[];
  

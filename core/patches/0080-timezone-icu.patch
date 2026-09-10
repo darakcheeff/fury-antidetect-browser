@@ -1,20 +1,22 @@
 diff --git a/third_party/blink/renderer/core/timezone/timezone_controller.cc b/third_party/blink/renderer/core/timezone/timezone_controller.cc
-index 48eb8d2fbd..0ebc3e2451 100644
+index 270c78bfd0..5a7d2828f0 100644
 --- a/third_party/blink/renderer/core/timezone/timezone_controller.cc
 +++ b/third_party/blink/renderer/core/timezone/timezone_controller.cc
-@@ -4,6 +4,8 @@
+@@ -6,6 +6,7 @@
  
- #include "third_party/blink/renderer/core/timezone/timezone_controller.h"
- 
-+#include "components/fury/fury_config.h"
-+
+ #include "base/command_line.h"
  #include "base/feature_list.h"
++#include "components/fury/fury_config.h"
  #include "mojo/public/cpp/bindings/pending_remote.h"
  #include "mojo/public/cpp/bindings/remote.h"
-@@ -102,6 +104,37 @@ TimeZoneController::~TimeZoneController() = default;
- 
- // static
- void TimeZoneController::Init() {
+ #include "third_party/blink/public/common/features.h"
+@@ -110,6 +111,40 @@ void TimeZoneController::Init() {
+       base::FeatureList::IsEnabled(features::kWebUIBypassMojoConnections)) {
+     return;
+   }
++  // Placed after upstream's Top Chrome WebUI bypass above, not before it:
++  // those renderers draw browser UI, run no page script, and upstream has
++  // just decided not to initialise this controller in them.
 +  // Applied once at renderer startup, before any page script runs.
 +  //
 +  // SetIcuTimeZoneAndNotifyV8 adopts the ICU default AND calls

@@ -1,17 +1,17 @@
 diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
-index 311a3dfebc..d5d69e6f79 100644
+index 5d917f14eb..ae1e0634c3 100644
 --- a/chrome/browser/BUILD.gn
 +++ b/chrome/browser/BUILD.gn
-@@ -2309,6 +2309,7 @@ static_library("browser") {
-     "//components/origin_trials:browser",
-     "//components/origin_trials:common",
+@@ -2404,6 +2404,7 @@ source_set("browser") {
+     "//components/feed/core/shared_prefs:feed_shared_prefs",
+     "//components/find_in_page",
      "//components/fury",
 +    "//components/fury/key_provider",
      "//components/fury/location",
-     "//components/os_crypt/async/browser",
-     "//components/page_info/core:proto",
+     "//components/gcm_driver",
+     "//components/history/content/browser",
 diff --git a/chrome/browser/browser_process_impl.cc b/chrome/browser/browser_process_impl.cc
-index 3389caba30..7f79cdd85a 100644
+index 5e0f458c31..b589a4f429 100644
 --- a/chrome/browser/browser_process_impl.cc
 +++ b/chrome/browser/browser_process_impl.cc
 @@ -120,6 +120,8 @@
@@ -23,7 +23,7 @@ index 3389caba30..7f79cdd85a 100644
  #include "components/os_crypt/async/browser/os_crypt_async.h"
  #include "components/permissions/permissions_client.h"
  #include "components/policy/core/common/policy_service.h"
-@@ -1530,6 +1532,21 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
+@@ -1545,6 +1547,21 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
    std::vector<std::pair<size_t, std::unique_ptr<os_crypt_async::KeyProvider>>>
        providers;
  
@@ -78,7 +78,7 @@ index 0000000000..c36ffb9291
 +}
 diff --git a/components/fury/key_provider/fury_key.cc b/components/fury/key_provider/fury_key.cc
 new file mode 100644
-index 0000000000..1bb45e4007
+index 0000000000..c58c7c6bb2
 --- /dev/null
 +++ b/components/fury/key_provider/fury_key.cc
 @@ -0,0 +1,119 @@
@@ -265,10 +265,10 @@ index 0000000000..90a1beb649
 +#endif  // COMPONENTS_FURY_KEY_PROVIDER_FURY_KEY_H_
 diff --git a/components/fury/key_provider/fury_key_provider.cc b/components/fury/key_provider/fury_key_provider.cc
 new file mode 100644
-index 0000000000..3104fbcd9e
+index 0000000000..182b8ac22a
 --- /dev/null
 +++ b/components/fury/key_provider/fury_key_provider.cc
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,44 @@
 +// Copyright 2026 The Fury Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -312,19 +312,13 @@ index 0000000000..3104fbcd9e
 +  return true;
 +}
 +
-+bool FuryKeyProvider::IsCompatibleWithOsCryptSync() {
-+  // See the class comment: false here means the cookie store silently keeps
-+  // using the machine-bound key, and the whole patch does nothing.
-+  return true;
-+}
-+
 +}  // namespace fury
 diff --git a/components/fury/key_provider/fury_key_provider.h b/components/fury/key_provider/fury_key_provider.h
 new file mode 100644
-index 0000000000..0a6585c325
+index 0000000000..21dc6a18c5
 --- /dev/null
 +++ b/components/fury/key_provider/fury_key_provider.h
-@@ -0,0 +1,77 @@
+@@ -0,0 +1,80 @@
 +// Copyright 2026 The Fury Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -367,15 +361,19 @@ index 0000000000..0a6585c325
 +// selects `provider_for_encryption_` — the highest-precedence provider that
 +// answered with a key.
 +//
-+// `IsCompatibleWithOsCryptSync()` must ALSO be true, for a second set of files:
-+// extension cookies, the password reuse manager, the GCM driver and the device
-+// OAuth2 token store all ask with `Option::kEncryptSyncCompat`, which selects
-+// `provider_for_os_crypt_sync_compatible_encryption_` — a slot only providers
-+// answering true ever fill. Answering false would leave all four still
-+// encrypted under the machine's own key, which is the state this patch exists
-+// to end. The flag's literal meaning is vacuous in M150: `components/os_crypt/sync`
-+// does not exist in this checkout and nothing includes it, so all the answer
-+// does now is decide which provider backs that option.
++// There used to be a second answer to give here, and where it went matters.
++// Through M150 the interface also carried `IsCompatibleWithOsCryptSync()`,
++// which had to be true for a second set of files: extension cookies, the
++// password reuse manager, the GCM driver and the device OAuth2 token store all
++// asked with `Option::kEncryptSyncCompat`, and that selected a separate
++// provider slot only providers answering true ever filled.
++//
++// M153 removed the method, the option and the slot together. `OSCryptAsync`
++// now keeps one `provider_for_encryption_`, chosen by `UseForEncryption()`
++// alone, and all four of those consumers take the same encryptor as the main
++// cookie jar. Checked against the tree at the 153 rebase rather than assumed:
++// `kEncryptSyncCompat` appears nowhere in it, and `Encryptor` has no `Option`
++// enum at all. The single answer above now covers what once took two.
 +//
 +// AES-256-GCM, not the AES-128-CBC the platform providers use. GCM is
 +// authenticated, so a key that is merely WRONG fails cleanly. CBC does not:
@@ -396,7 +394,6 @@ index 0000000000..0a6585c325
 +  // os_crypt_async::KeyProvider:
 +  void GetKey(KeyCallback callback) override;
 +  bool UseForEncryption() override;
-+  bool IsCompatibleWithOsCryptSync() override;
 +};
 +
 +}  // namespace fury

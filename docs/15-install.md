@@ -57,7 +57,7 @@ attached to the download, and — the step that matters — it **runs the browse
 once and checks it starts**. If it prints a version, it is installed:
 
 ```
-installed Fury 150.0.7871.187
+installed Fury 153.0.8010.37
   /Users/you/Library/Application Support/Fury/core.bundle/Fury.app/Contents/MacOS/Fury
 ```
 

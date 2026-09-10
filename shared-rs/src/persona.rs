@@ -726,8 +726,8 @@ mod tests {
             languages: vec!["en-US".into(), "en".into()],
             ui_locale: "en-US".into(),
             geolocation: Some((40.7128, -74.0060)),
-            chrome_major: 150,
-            chrome_full_version: "150.0.7871.187".into(),
+            chrome_major: 153,
+            chrome_full_version: "153.0.8010.37".into(),
         }
     }
 

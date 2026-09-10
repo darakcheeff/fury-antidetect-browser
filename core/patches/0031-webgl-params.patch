@@ -1,5 +1,5 @@
 diff --git a/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc b/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
-index ceb4c3f606..78e41822f7 100644
+index 403e1b307f..eb8dcdf810 100644
 --- a/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
 +++ b/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
 @@ -25,6 +25,11 @@
@@ -14,7 +14,7 @@ index ceb4c3f606..78e41822f7 100644
  #include <inttypes.h>
  
  #include <memory>
-@@ -3972,10 +3977,136 @@ void WebGLRenderingContextBase::RecordANGLEImplementation() {
+@@ -3987,10 +3992,136 @@ void WebGLRenderingContextBase::RecordANGLEImplementation() {
                              webgl_angle_implementation);
  }
  
@@ -151,7 +151,7 @@ index ceb4c3f606..78e41822f7 100644
    const int kIntZero = 0;
    switch (pname) {
      case GL_ACTIVE_TEXTURE:
-@@ -4518,6 +4649,20 @@ WebGLRenderingContextBase::getSupportedExtensions() {
+@@ -4533,6 +4664,20 @@ WebGLRenderingContextBase::getSupportedExtensions() {
      }
    }
  
@@ -172,7 +172,7 @@ index ceb4c3f606..78e41822f7 100644
    return result;
  }
  
-@@ -5341,6 +5486,33 @@ void WebGLRenderingContextBase::ReadPixelsHelper(GLint x,
+@@ -5356,6 +5501,33 @@ void WebGLRenderingContextBase::ReadPixelsHelper(GLint x,
      }
      ContextGL()->ReadPixels(x, y, width, height, format, type, data);
    }

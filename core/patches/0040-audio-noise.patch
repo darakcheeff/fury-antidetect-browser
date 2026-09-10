@@ -1,17 +1,16 @@
 diff --git a/third_party/blink/renderer/modules/webaudio/audio_context.cc b/third_party/blink/renderer/modules/webaudio/audio_context.cc
-index 64cc335435..6e986a7582 100644
+index 9136c6e6c1..54e611055e 100644
 --- a/third_party/blink/renderer/modules/webaudio/audio_context.cc
 +++ b/third_party/blink/renderer/modules/webaudio/audio_context.cc
-@@ -4,6 +4,8 @@
- 
- #include "third_party/blink/renderer/modules/webaudio/audio_context.h"
- 
+@@ -14,6 +14,7 @@
+ #include "base/strings/to_string.h"
+ #include "base/trace_event/trace_event.h"
+ #include "build/build_config.h"
 +#include "components/fury/fury_config.h"
-+
- #include <atomic>
- 
- #include "base/functional/callback_helpers.h"
-@@ -1159,6 +1161,18 @@ double AudioContext::outputLatency() const {
+ #include "media/audio/audio_device_description.h"
+ #include "media/base/output_device_info.h"
+ #include "services/metrics/public/cpp/ukm_builders.h"
+@@ -1251,6 +1252,18 @@ double AudioContext::outputLatency() const {
  
    DeferredTaskHandler::GraphAutoLocker locker(GetDeferredTaskHandler());
  
@@ -31,7 +30,7 @@ index 64cc335435..6e986a7582 100644
    return std::round(output_position_.hardware_output_latency / factor) * factor;
  }
 diff --git a/third_party/blink/renderer/modules/webaudio/offline_audio_context.cc b/third_party/blink/renderer/modules/webaudio/offline_audio_context.cc
-index fcac660801..7c44c1d5e8 100644
+index 4604be68ad..0730570e4d 100644
 --- a/third_party/blink/renderer/modules/webaudio/offline_audio_context.cc
 +++ b/third_party/blink/renderer/modules/webaudio/offline_audio_context.cc
 @@ -25,6 +25,8 @@
@@ -43,7 +42,7 @@ index fcac660801..7c44c1d5e8 100644
  #include "base/metrics/histogram_functions.h"
  #include "base/metrics/histogram_macros.h"
  #include "media/base/audio_glitch_info.h"
-@@ -432,6 +434,46 @@ void OfflineAudioContext::FireCompletionEvent() {
+@@ -437,6 +439,46 @@ void OfflineAudioContext::FireCompletionEvent() {
        return;
      }
  

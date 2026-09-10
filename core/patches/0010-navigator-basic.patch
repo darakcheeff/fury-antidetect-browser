@@ -1,8 +1,8 @@
 diff --git a/net/BUILD.gn b/net/BUILD.gn
-index 06f2c84180..e3386b154c 100644
+index 1195c4be9c..00b0c1098c 100644
 --- a/net/BUILD.gn
 +++ b/net/BUILD.gn
-@@ -1209,6 +1209,7 @@ component("net") {
+@@ -1218,6 +1218,7 @@ component("net") {
    deps = [
      ":cronet_buildflags",
      ":net_deps",
@@ -11,7 +11,7 @@ index 06f2c84180..e3386b154c 100644
      "//components/unexportable_keys",
      "//net/http:transport_security_state_generated_files",
 diff --git a/net/DEPS b/net/DEPS
-index 6e6242a538..78cd5924c7 100644
+index 487034149f..e1d78cdc47 100644
 --- a/net/DEPS
 +++ b/net/DEPS
 @@ -1,4 +1,5 @@
@@ -21,7 +21,7 @@ index 6e6242a538..78cd5924c7 100644
    "+components/unexportable_keys",
    "+crypto",
 diff --git a/net/http/http_util.cc b/net/http/http_util.cc
-index 9fead7fdb5..f37e34bb04 100644
+index a94f6c6320..fc38a18654 100644
 --- a/net/http/http_util.cc
 +++ b/net/http/http_util.cc
 @@ -7,6 +7,9 @@
@@ -33,8 +33,8 @@ index 9fead7fdb5..f37e34bb04 100644
 +
  #include <algorithm>
  #include <array>
- #include <optional>
-@@ -801,12 +804,32 @@ std::string HttpUtil::ExpandLanguageList(std::string_view language_prefs) {
+ #include <limits>
+@@ -885,12 +888,32 @@ std::string HttpUtil::ExpandLanguageList(std::string_view language_prefs) {
  // we may have to make it more robust.
  std::string HttpUtil::GenerateAcceptLanguageHeader(
      const std::string& raw_language_list) {

@@ -643,7 +643,7 @@ index 0000000000..f1c8705b74
 +#endif  // COMPONENTS_FURY_FURY_NOISE_H_
 diff --git a/components/fury/fury_switches.cc b/components/fury/fury_switches.cc
 new file mode 100644
-index 0000000000..32ac0fc6d0
+index 0000000000..689f3b74d8
 --- /dev/null
 +++ b/components/fury/fury_switches.cc
 @@ -0,0 +1,15 @@
@@ -664,7 +664,7 @@ index 0000000000..32ac0fc6d0
 +}  // namespace fury
 diff --git a/components/fury/fury_switches.h b/components/fury/fury_switches.h
 new file mode 100644
-index 0000000000..9400652a6a
+index 0000000000..1ce61872a2
 --- /dev/null
 +++ b/components/fury/fury_switches.h
 @@ -0,0 +1,44 @@
@@ -713,10 +713,10 @@ index 0000000000..9400652a6a
 +
 +#endif  // COMPONENTS_FURY_FURY_SWITCHES_H_
 diff --git a/content/app/BUILD.gn b/content/app/BUILD.gn
-index e3c038ff40..d89cef0e31 100644
+index d9b662aab3..12737e7a98 100644
 --- a/content/app/BUILD.gn
 +++ b/content/app/BUILD.gn
-@@ -77,6 +77,7 @@ source_set("content_main_runner_app") {
+@@ -69,6 +69,7 @@ source_set("content_main_runner_app") {
  
    configs += extra_configs
    deps = content_app_deps + [
@@ -725,19 +725,19 @@ index e3c038ff40..d89cef0e31 100644
             "//content/browser",
             "//content/gpu:gpu_sources",
 diff --git a/content/app/content_main_runner_impl.cc b/content/app/content_main_runner_impl.cc
-index 338a198ece..bbe19a3c08 100644
+index 7a8ade5283..abebf1c2e3 100644
 --- a/content/app/content_main_runner_impl.cc
 +++ b/content/app/content_main_runner_impl.cc
-@@ -57,6 +57,8 @@
+@@ -58,6 +58,8 @@
  #include "build/build_config.h"
  #include "components/discardable_memory/service/discardable_shared_memory_manager.h"
  #include "components/download/public/common/download_task_runner.h"
 +#include "components/fury/fury_config.h"
 +#include "components/fury/fury_switches.h"
  #include "components/power_monitor/make_power_monitor_device_source.h"
+ #include "components/tracing/common/tracing_switches.h"
  #include "components/variations/net/variations_command_line.h"
- #include "components/variations/variations_ids_provider.h"
-@@ -130,6 +132,9 @@
+@@ -133,6 +135,9 @@
  #include <malloc.h>
  #include <cstring>
  
@@ -747,7 +747,7 @@ index 338a198ece..bbe19a3c08 100644
  #include "ui/base/l10n/l10n_util_win.h"
  #include "ui/display/win/dpi.h"
  #elif BUILDFLAG(IS_MAC)
-@@ -852,6 +857,12 @@ int ContentMainRunnerImpl::Initialize(ContentMainParams params) {
+@@ -863,6 +868,12 @@ int ContentMainRunnerImpl::Initialize(ContentMainParams params) {
    g_fds->Set(kPseudonymizationSaltDescriptor,
               kPseudonymizationSaltDescriptor +
                   base::GlobalDescriptors::kBaseDescriptor);
@@ -760,7 +760,7 @@ index 338a198ece..bbe19a3c08 100644
  #endif  // !BUILDFLAG(IS_ANDROID)
  
  #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OPENBSD)
-@@ -862,6 +873,69 @@ int ContentMainRunnerImpl::Initialize(ContentMainParams params) {
+@@ -873,6 +884,69 @@ int ContentMainRunnerImpl::Initialize(ContentMainParams params) {
  
  #endif  // !BUILDFLAG(IS_WIN)
  
@@ -831,10 +831,10 @@ index 338a198ece..bbe19a3c08 100644
    TRACE_EVENT0("startup,benchmark,rail", "ContentMainRunnerImpl::Initialize");
  
 diff --git a/content/browser/BUILD.gn b/content/browser/BUILD.gn
-index d8b60778cd..73b50136b8 100644
+index ac8af97f18..26a7d4f035 100644
 --- a/content/browser/BUILD.gn
 +++ b/content/browser/BUILD.gn
-@@ -171,6 +171,7 @@ source_set("browser") {
+@@ -192,6 +192,7 @@ source_set("browser") {
      "//components/ukm/debug:util",
      "//components/url_formatter",
      "//components/url_matcher",
@@ -843,7 +843,7 @@ index d8b60778cd..73b50136b8 100644
      "//components/variations/net",
      "//components/version_info",
 diff --git a/content/browser/child_process_launcher_helper.cc b/content/browser/child_process_launcher_helper.cc
-index 08b3100781..7365d17919 100644
+index 34a9ba1470..018be53d3c 100644
 --- a/content/browser/child_process_launcher_helper.cc
 +++ b/content/browser/child_process_launcher_helper.cc
 @@ -22,6 +22,8 @@
@@ -888,7 +888,7 @@ index 08b3100781..7365d17919 100644
  void PassStartupTracingConfigSharedMemoryHandle(
      const base::ReadOnlySharedMemoryRegion* read_only_memory_region,
      base::CommandLine& command_line,
-@@ -327,6 +355,8 @@ void ChildProcessLauncherHelper::LaunchOnLauncherThread() {
+@@ -332,6 +360,8 @@ void ChildProcessLauncherHelper::LaunchOnLauncherThread() {
        *command_line(), options_ptr, files_to_register.get());
    PassFieldTrialSharedMemoryHandle(*command_line(), options_ptr,
                                     files_to_register.get());
@@ -916,35 +916,35 @@ index 9542306fd8..cdb4cded31 100644
    kContentDynamicDescriptorStart = 100,
    kContentDynamicDescriptorMax = 199,
 diff --git a/third_party/blink/renderer/core/BUILD.gn b/third_party/blink/renderer/core/BUILD.gn
-index e84a67cee8..b0e21135e1 100644
+index 8969a71c82..cf87ef8e50 100644
 --- a/third_party/blink/renderer/core/BUILD.gn
 +++ b/third_party/blink/renderer/core/BUILD.gn
-@@ -405,6 +405,7 @@ component("core") {
+@@ -408,6 +408,7 @@ component("core") {
      ":make_deprecation_info",
      ":xml_ffi",
      "//base",
 +    "//components/fury",
-     "//components/attribution_reporting",
-     "//components/attribution_reporting:mojom_blink",
      "//components/paint_preview/common",
+     "//components/performance_manager/public/mojom:mojom_blink",
+     "//components/shared_highlighting/core/common",
 diff --git a/third_party/blink/renderer/core/DEPS b/third_party/blink/renderer/core/DEPS
-index f4684efd4b..533991a7fc 100644
+index db7a924b95..25a9d335ab 100644
 --- a/third_party/blink/renderer/core/DEPS
 +++ b/third_party/blink/renderer/core/DEPS
-@@ -66,6 +66,8 @@ include_rules = [
+@@ -69,6 +69,8 @@ include_rules = [
      "+cc/trees/target_property.h",
      "+cc/trees/ukm_manager.h",
      "+components/subresource_filter/core/common/scoped_rule.h",
 +    "+components/fury/fury_config.h",
 +    "+components/fury/fury_noise.h",
-     "+components/attribution_reporting/features.h",
      "+components/performance_manager/public/mojom/coordination_unit.mojom-blink.h",
      "+components/performance_manager/public/mojom/web_memory.mojom-blink.h",
+     "+components/viz/common/frame_timing_details.h",
 diff --git a/third_party/blink/renderer/modules/BUILD.gn b/third_party/blink/renderer/modules/BUILD.gn
-index 3955d4448f..8ac269e307 100644
+index 269ff4196e..dbc67b677f 100644
 --- a/third_party/blink/renderer/modules/BUILD.gn
 +++ b/third_party/blink/renderer/modules/BUILD.gn
-@@ -197,6 +197,7 @@ component("modules") {
+@@ -202,6 +202,7 @@ component("modules") {
    }
  
    deps = [
@@ -964,10 +964,10 @@ index 875071014b..fe8a93bcf3 100644
      "+base/memory/scoped_refptr.h",
      "+base/memory/values_equivalent.h",
 diff --git a/third_party/blink/renderer/platform/BUILD.gn b/third_party/blink/renderer/platform/BUILD.gn
-index ac8478a059..4d0122d4a2 100644
+index 9bfa9565f0..145adb1bce 100644
 --- a/third_party/blink/renderer/platform/BUILD.gn
 +++ b/third_party/blink/renderer/platform/BUILD.gn
-@@ -147,6 +147,7 @@ executable("character_data_generator") {
+@@ -153,6 +153,7 @@ executable("character_data_generator") {
    ]
    configs += [ "//third_party/blink/renderer:config" ]
    deps = [
@@ -976,7 +976,7 @@ index ac8478a059..4d0122d4a2 100644
      "//base",
      "//build/win:default_exe_manifest",
 diff --git a/third_party/blink/renderer/platform/DEPS b/third_party/blink/renderer/platform/DEPS
-index fd932f314f..e7fc25a5c9 100644
+index 513ff0f81c..0e7c2723dd 100644
 --- a/third_party/blink/renderer/platform/DEPS
 +++ b/third_party/blink/renderer/platform/DEPS
 @@ -1,4 +1,5 @@
