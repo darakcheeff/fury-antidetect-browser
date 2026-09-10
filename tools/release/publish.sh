@@ -47,7 +47,7 @@ fi
 # What the world sees first. 350 characters is GitHub's limit and the first
 # ~150 are what a search result shows, so the words that matter go early.
 # ---------------------------------------------------------------------------
-DESCRIPTION="Free, open-source anti-detect browser. A Chromium 150 fork that spoofs the fingerprint in C++ rather than with injected JavaScript, with per-profile personas, proxies, and a self-hostable team server with per-project access. No seats, no per-profile pricing, no telemetry."
+DESCRIPTION="Free, open-source anti-detect browser. A Chromium 153 fork that spoofs the fingerprint in C++ rather than with injected JavaScript, with per-profile personas, proxies, and a self-hostable team server with per-project access. No seats, no per-profile pricing, no telemetry."
 
 HOMEPAGE=""
 

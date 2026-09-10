@@ -54,15 +54,38 @@ else
 fi
 
 # --- the core ---------------------------------------------------------------
-for candidate in "$here/dist-release/fury-core-windows.tar.xz" "$here/dist/fury-core-windows.tar.xz"; do
-  if [ -f "$candidate" ]; then
-    cp "$candidate" "$dest/fury-core-$version-windows-x64.tar.xz"
-    say "core        fury-core-$version-windows-x64.tar.xz"
-    break
+# The NEWEST of the candidates, and it must not predate the build it claims to
+# package. This used to take the first that existed, with dist-release/ ahead of
+# dist/ -- and dist-release/ is where a PAST release was staged while dist/ is
+# where pack-core-windows.sh writes. So after a rebase and a fresh pack, the
+# collector kept picking a four-week-old core: measured 10.09.2026, three
+# releases' worth of "fury-core-<version>-windows-x64.tar.xz" all came out
+# byte-identical to the one packed on 16.08, and nothing said so.
+#
+# Shipping that would have paired a 150 core with a 153 agent -- a browser
+# introducing itself as one version while being another, which is the exact
+# contradiction the patch series exists to prevent.
+core=""
+for candidate in "$here/dist/fury-core-windows.tar.xz" "$here/dist-release/fury-core-windows.tar.xz"; do
+  [ -f "$candidate" ] || continue
+  if [ -z "$core" ] || [ "$candidate" -nt "$core" ]; then
+    core="$candidate"
   fi
 done
-[ -f "$dest/fury-core-$version-windows-x64.tar.xz" ] || \
+
+if [ -z "$core" ]; then
   say "core        MISSING -- run: tools/release/pack-core-windows.sh"
+else
+  built="$here/core/src/out/windows-x64.noindex/chrome.exe"
+  if [ -f "$built" ] && [ "$built" -nt "$core" ]; then
+    say "core        REFUSED: $(basename "$(dirname "$core")")/$(basename "$core") is older than the"
+    say "            build in core/src/out/windows-x64.noindex. Re-pack it first:"
+    say "              OUT_DIR=core/src/out/windows-x64.noindex tools/release/pack-core-windows.sh"
+    exit 1
+  fi
+  cp "$core" "$dest/fury-core-$version-windows-x64.tar.xz"
+  say "core        fury-core-$version-windows-x64.tar.xz  (from $(basename "$(dirname "$core")")/)"
+fi
 
 # --- checksums --------------------------------------------------------------
 # So that a file copied between machines can be shown to have arrived intact,
