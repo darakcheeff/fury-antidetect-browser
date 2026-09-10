@@ -48,7 +48,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 or k.lower() == "accept-language"
             }
             (BASELINES / "_last_request_headers.json").write_text(
-                json.dumps(interesting, indent=2, ensure_ascii=False)
+                json.dumps(interesting, indent=2, ensure_ascii=False),
+                encoding="utf-8",
             )
         # A ServiceWorker script has to be same-origin and cannot be a blob:,
         # which is why that context reported `__absent: "TypeError"` in every
@@ -102,7 +103,17 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.send_error(400, "path escapes baselines/")
             return
 
-        target.write_text(json.dumps(dump, indent=2, ensure_ascii=False))
+        # encoding="utf-8" explicitly, and it is not a nicety. write_text with no
+        # encoding uses the platform default: UTF-8 on macOS, cp1252 on the
+        # Windows build box. ensure_ascii=False above means the dump keeps the
+        # characters it measured -- font family names, script samples -- and
+        # cp1252 cannot encode them. The capture then leaves a ZERO-BYTE
+        # baseline and a UnicodeEncodeError in collector.log, while the browser
+        # has already been closed and the probe looks like it never answered.
+        # Measured 10.09.2026, capturing the Chrome 153 reference on Windows.
+        target.write_text(
+            json.dumps(dump, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
         rel = target.relative_to(HERE.parent.parent)
         print(f"saved {rel} ({target.stat().st_size:,} bytes)", flush=True)
 
