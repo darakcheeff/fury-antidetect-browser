@@ -108,7 +108,50 @@ fi
 # --- checkout the tag -------------------------------------------------------
 echo "==> Fetching tag $CHROMIUM_VERSION"
 git -C "$SRC" fetch --depth 1 origin "refs/tags/$CHROMIUM_VERSION"
-git -C "$SRC" checkout -q --detach FETCH_HEAD
+
+# A tree with the patch series on it cannot be checked out over, and silently
+# discarding somebody's edits is not this script's call to make. The series is
+# regenerable from core/patches and the icons from core/build/link-icons.sh, so
+# the fix is one line -- but it is the caller who runs it.
+if [ -n "$(git -C "$SRC" status --porcelain)" ]; then
+  echo "!! $SRC has local changes. If they are only the applied patch series," >&2
+  echo "!! and core/build/apply.sh can put them back, clear it with:" >&2
+  echo >&2
+  echo "     git -C $SRC reset --hard && git -C $SRC clean -fd -e out" >&2
+  echo >&2
+  echo "!! Anything else in there is yours and this will not touch it." >&2
+  exit 1
+fi
+
+# `-f`, and a loop that removes what git names, because moving between
+# milestones is not a plain checkout. Upstream starts TRACKING files that the
+# previous milestone's DEPS pulled in as untracked gclient content, and git
+# refuses to overwrite an untracked file rather than choosing for you:
+#
+#   error: The following untracked working tree files would be overwritten
+#          by checkout: third_party/aria-practices/src/LICENSE.md ...
+#   Aborting
+#
+# Measured 09.09.2026 going 150 -> 153. Under `set -e` fetch.sh died there,
+# before gclient sync, with a message about files and nothing about versions.
+#
+# Only paths under third_party/ are ever deleted: those are gclient's, and the
+# sync below puts them back. A blocker anywhere else stops this, because it
+# would mean something other than a dependency has moved.
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+  if err=$(git -C "$SRC" checkout -f -q --detach FETCH_HEAD 2>&1); then
+    break
+  fi
+  blockers=$(printf '%s\n' "$err" | sed -n 's/^\t\(third_party\/[^/]*\/[^/]*\).*/\1/p' | sort -u)
+  if [ -z "$blockers" ]; then
+    echo "!! Cannot check out $CHROMIUM_VERSION:" >&2
+    printf '%s\n' "$err" >&2
+    exit 1
+  fi
+  echo "==> clearing $(printf '%s\n' "$blockers" | wc -l | tr -d ' ') dependency dir(s) upstream now tracks"
+  printf '%s\n' "$blockers" | while read -r d; do [ -n "$d" ] && rm -rf "$SRC/$d"; done
+  [ "$attempt" = 10 ] && { echo "!! still blocked after 10 rounds" >&2; exit 1; }
+done
 
 echo "==> gclient sync (this is the slow part)"
 (cd "$CORE_DIR" && "$GCLIENT" sync --with_branch_heads --with_tags -D --no-history)
