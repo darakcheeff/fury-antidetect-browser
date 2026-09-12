@@ -65,6 +65,13 @@ This is the inverse. Every vector is documented against the Chromium file it
 lives in, the patches are in the repo, and you can measure it yourself with the
 bench that ships alongside.
 
+"Self-hosted" is a word others use now too — with a closed core behind a licence
+key and one token for the whole installation. Here three things come together,
+each of which exists somewhere on its own and nowhere together: **a core you can
+build and verify**, **a team** with roles, locks and an audit trail, and **a
+server you run yourself** that cannot read your bundles
+([docs/08](docs/08-competitors.md)).
+
 ## Three ways to run it
 
 | | What you host | For |
@@ -92,10 +99,10 @@ MacBook, reports:
 
 ```
 navigator.platform      Win32
-userAgent               Windows NT 10.0; Win64; x64 … Chrome/150.0.0.0
+userAgent               Windows NT 10.0; Win64; x64 … Chrome/153.0.0.0
 WebGL renderer          ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 Direct3D11 …)
 screen                  1920×1080, availHeight 1032   ← the taskbar
-Client Hints platform   Windows        brands: … Google Chrome/150
+Client Hints platform   Windows        brands: … Google Chrome/153
 timezone                Europe/Berlin
 navigator.webdriver     false
 ```
@@ -182,6 +189,26 @@ Six endpoints and one bearer token, off until `FURY_API_PORT` says otherwise.
 and the one people actually want: run a job across every profile, one at a time,
 never leaving a browser open on a failure.
 
+**MCP server — [tools/mcp/fury-mcp.py](tools/mcp/fury-mcp.py).** The same
+operations for Claude Desktop, Cursor and any MCP client: "open every profile
+tagged warm, visit the platform, close them". Competitors sell this as an "AI
+agent" — for credits, on their model, on their server, with access to your
+profiles. Here the agent is yours, the key is yours, and nothing about a profile
+leaves the machine. Not less convenient; fewer intermediaries.
+
+**Extensions** — a `.crx` is installed into a profile from the application; the
+extension's id survives cloning (the developer key is written into the
+manifest), so a wallet or an anti-captcha stays signed in inside the copy.
+
+**Domain lists** — a per-profile blocklist enforced by the relay (DoH cannot
+route around it), or a whitelist: put `@allow-only` on the first line and the
+profile opens only the platforms named. For the team member who should be on
+one.
+
+**Fingerprint probe** — every profile's start page links to a full detect-suite
+run inside that profile: every vector, every execution context, in a secure
+context. The same probe the baselines are captured with, not a separate display.
+
 ## Check it yourself
 
 Do not take any of the above on trust — measure it:
@@ -232,10 +259,10 @@ about it is worth more than not.
 
 | | |
 |---|---|
-| Windows core build | the patches are written for it and have never been compiled there. No Windows core has been built or measured, so there is no Windows release and saying otherwise would be the thing this project refuses to do. Everything the core needs from the launcher is in place: the config and the OS-crypt key arrive as inherited HANDLEs, and patches 0001 and 0110 read them |
-| Windows launcher | ported and cross-checked, not yet run. The transport, the DACLs, the config carrier, the clean-shutdown request and the file permissions live in [platform-rs](platform-rs/src) — one crate, because `cargo check --target x86_64-pc-windows-msvc` runs on a Mac for it and does not for the agent (ring wants a Windows C toolchain). CI checks that target on every commit and refuses any dependency that would take it away. It has already caught three mistakes that would otherwise have been found on a rented machine, and a fourth by reading: the config carrier nearly took `--fury-fp-handle`, which patch 0001 already uses for something else. What no compiler can check — that a DACL refuses, that a handle survives CreateProcess, that WM_CLOSE reaches Chromium — is [tools/verify-windows.ps1](tools/verify-windows.ps1), which needs a Windows machine |
+| ~~Windows core build~~ | done 16.08.2026: the core builds on the build server, release `v0.1.2` ships `fury-core-0.1.2-windows-x64.tar.xz` on Chromium 153, `verify-windows.ps1` passes 30 claims, Widevine answers |
+| ~~Windows launcher~~ | done: agent and shell run, NSIS installer in the releases. The config reaches the browser as an inherited HANDLE and no persona value appears in any argv — checked on a live machine |
 | Linux | not a target, and this is a decision rather than a gap. The Rust still compiles there so CI and contributors can run the suite; there is no Linux release, no Linux core config and no plan for one. Shipping a third platform nobody tests would be a claim, not a port |
-| Code signing and notarisation | the tooling is written and needs an Apple Developer certificate nobody has yet ([tools/release/sign-core.sh](tools/release/sign-core.sh)). Until then macOS will complain about a downloaded build |
+| Code signing and notarisation | the tooling is written ([sign-core.sh](tools/release/sign-core.sh), [sign-shell.sh](tools/release/sign-shell.sh)); the Apple Developer enrolment was paid on 15.08.2026 and is waiting on Apple. Until then macOS says "unidentified developer" (right-click → Open) and Windows shows SmartScreen |
 | ~~Client-side bundle encryption~~ | done, and verified end to end against a running server: what it writes to disk holds neither the cookie, nor a tar header, nor a gzip header, and a foreign organisation key does not open it |
 | ~~Bundle sync with the server~~ | done. Packed and sealed on stop, fetched and unpacked on launch, versioned so a second uploader is refused rather than silently winning. Uploads stream to disk: they used to buffer, under axum's 2 MB default, which meant sync had never once worked for a real profile |
 | WebRTC through the proxy | no. The relay is TCP; patch 0070 puts the browser in the state a real Chrome reaches under the enterprise `WebRTCIPHandlingPolicy` — no ICE candidates at all — rather than let a peer connection go around the proxy and hand the page the real address |

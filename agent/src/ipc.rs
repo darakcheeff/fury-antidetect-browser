@@ -136,15 +136,16 @@ pub fn parse_location(raw: &str) -> Option<(f64, f64)> {
 /// in the database, for the same reason `running` is: a flag can be wrong after
 /// a crash, or after a bundle is unpacked from a colleague's machine, and the
 /// Sessions directory is the very thing the browser will read a moment later.
-fn start_urls_for(dir: &std::path::Path, configured: &[String]) -> Vec<String> {
+fn start_urls_for(dir: &std::path::Path, configured: &[String], start_page: &str) -> Vec<String> {
     if dir.join("Default").join("Sessions").is_dir() {
         return Vec::new();
     }
     if configured.is_empty() {
         // Nothing configured means the start page, not a blank tab: the first
         // thing an operator needs after opening a profile is proof that the
-        // disguise and the exit are working.
-        return vec![crate::relay::START_URL.to_string()];
+        // disguise and the exit are working. The address carries this
+        // launch's token — see `Relay::start_url`.
+        return vec![start_page.to_string()];
     }
     configured.to_vec()
 }
@@ -474,10 +475,14 @@ impl Agent {
                         // Parsed rather than counted by lines: what matters is
                         // how many domains it will actually block, and a list
                         // is mostly comments.
-                        let n = std::fs::read_to_string(&f)
-                            .map(|t| crate::blocklist::Blocklist::parse(&t).len())
-                            .unwrap_or(0);
-                        out.push(json!({ "name": name, "domains": n }));
+                        let parsed = std::fs::read_to_string(&f)
+                            .map(|t| crate::blocklist::Blocklist::parse(&t))
+                            .unwrap_or_default();
+                        out.push(json!({
+                            "name": name,
+                            "domains": parsed.len(),
+                            "allow_only": parsed.is_allow_only(),
+                        }));
                     }
                 }
                 Ok(json!(out))
@@ -493,7 +498,17 @@ impl Agent {
                 // launch.
                 let parsed = crate::blocklist::Blocklist::parse(&text);
                 std::fs::write(&file, text)?;
-                Ok(json!({ "name": name, "domains": parsed.len() }))
+                Ok(json!({ "name": name, "domains": parsed.len(), "allow_only": parsed.is_allow_only() }))
+            }
+
+            // The text as written, for the editor. A list is a file the
+            // operator pasted; giving back the parsed set would lose their
+            // comments and their order.
+            "blocklists.read" => {
+                let name = str_param(&params, "name")?;
+                let file = blocklist_path(&name)?;
+                let text = std::fs::read_to_string(&file).unwrap_or_default();
+                Ok(json!({ "name": name, "text": text }))
             }
 
             "blocklists.delete" => {
@@ -507,9 +522,21 @@ impl Agent {
 
             "extensions.install" => {
                 let id = str_param(&params, "profile_id")?;
-                let path = str_param(&params, "path")?;
-                let bytes = std::fs::read(&path)
-                    .map_err(|e| anyhow::anyhow!("reading {path}: {e}"))?;
+                // Either a path on this machine or the .crx itself, base64.
+                // The desktop has no native file dialog — a file chosen in
+                // the webview is bytes in JavaScript, not a path the agent
+                // could open — and a CRX is a few megabytes, which the pipe
+                // carries without ceremony.
+                let bytes = if let Some(b64) = params.get("crx_b64").and_then(|v| v.as_str()) {
+                    use base64::Engine;
+                    base64::engine::general_purpose::STANDARD
+                        .decode(b64)
+                        .map_err(|e| anyhow::anyhow!("crx_b64 is not base64: {e}"))?
+                } else {
+                    let path = str_param(&params, "path")?;
+                    std::fs::read(&path)
+                        .map_err(|e| anyhow::anyhow!("reading {path}: {e}"))?
+                };
 
                 let parsed = crate::ext::parse(&bytes)?;
                 // Named by id, so installing the same extension twice replaces
@@ -1008,6 +1035,48 @@ impl Agent {
                     "gpu_vendor": get("gpu.webglParams.UNMASKED_VENDOR_WEBGL"),
                     "gpu_renderer": get("gpu.webglParams.UNMASKED_RENDERER_WEBGL"),
                     "client_hints_platform": get("clientHints.platform"),
+                    // The rest of what a page can read, so the panel shows
+                    // what the persona claims rather than a tenth of it. A
+                    // competitor lists 25 rows here; ours were 10, and a
+                    // reader concluded there were 10 things spoofed (docs/12,
+                    // audit of 12.09.2026).
+                    "chrome_version": get("clientHints.fullVersion"),
+                    "client_hints": format!(
+                        "{} {} · {} · {}-bit",
+                        get("clientHints.platform").as_str().unwrap_or(""),
+                        get("clientHints.platformVersion").as_str().unwrap_or(""),
+                        get("clientHints.architecture").as_str().unwrap_or(""),
+                        get("clientHints.bitness").as_str().unwrap_or("")
+                    ),
+                    "avail": format!(
+                        "{}×{}",
+                        get("screen.availWidth").as_i64().unwrap_or(0),
+                        get("screen.availHeight").as_i64().unwrap_or(0)
+                    ),
+                    "device_pixel_ratio": get("screen.devicePixelRatio"),
+                    "color_depth": get("screen.colorDepth"),
+                    "max_touch_points": get("navigator.maxTouchPoints"),
+                    "webgpu": match (get("gpu.webgpu.vendor").as_str(), get("gpu.webgpu.architecture").as_str()) {
+                        (Some(v), Some(a)) => serde_json::Value::String(format!("{v} · {a}")),
+                        _ => serde_json::Value::Null,
+                    },
+                    "webgl_extensions": get("gpu.webglExtensions").as_array().map(|a| a.len()).unwrap_or(0),
+                    "audio_sample_rate": get("audio.sampleRate"),
+                    "voices": get("speech.voices").as_array().map(|a| a.len()),
+                    "media_devices": match get("mediaDevices") {
+                        serde_json::Value::Null => serde_json::Value::Null,
+                        m => serde_json::Value::String(format!(
+                            "{} mic · {} cam · {} out",
+                            m.get("audioInputCount").and_then(|v| v.as_u64()).unwrap_or(0),
+                            m.get("videoInputCount").and_then(|v| v.as_u64()).unwrap_or(0),
+                            m.get("audioOutputCount").and_then(|v| v.as_u64()).unwrap_or(0)
+                        )),
+                    },
+                    "ui_locale": get("locale.locale"),
+                    "webrtc": get("webrtc.ipHandlingPolicy"),
+                    "js_heap_gb": get("engine.jsHeapSizeLimit").as_f64().map(|b| (b / 1073741824.0 * 10.0).round() / 10.0),
+                    "persona_source": persona.source,
+                    "persona_weight": persona.weight,
                     "fonts": get("fonts").as_array().map(|a| a.len()).unwrap_or(0),
                     // Named individually rather than as one "noise: on": these
                     // are independent streams, and a profile with canvas noise
@@ -1493,10 +1562,22 @@ impl Agent {
         // memory: a list edited between launches should take effect on the
         // next one without anything having to notice it changed.
         let blocked = std::sync::Arc::new(load_blocklists(&profile.blocklists));
-        let (relay_port, relay_task) = crate::relay::Relay::new(upstream)
-            .blocking(blocked)
-            .serve(0)
-            .await?;
+        let relay = crate::relay::Relay::new(upstream).blocking(blocked);
+        let start_page = relay.start_url();
+        let (relay_port, relay_task) = relay.serve(0).await?;
+        // The detect-suite probe, on the relay's own loopback address rather
+        // than on `fury.invalid`, and the difference is not cosmetic: loopback
+        // is a potentially trustworthy origin, so the page is a secure context
+        // and `navigator.deviceMemory`, `navigator.gpu`, `enumerateDevices()`
+        // and service workers all exist in it — every one is absent on plain
+        // http, which is why the start page shows "?" for memory. The browser
+        // still reaches the address through the relay (`<-loopback>` removed
+        // the bypass) and the relay recognises its own port. Same token as the
+        // start page; see `Relay::route`.
+        let probe_url = format!(
+            "http://127.0.0.1:{relay_port}/{}/probe/",
+            start_page.trim_end_matches('/').rsplit('/').next().unwrap_or_default()
+        );
 
         let persona = crate::personas::load(&profile.persona_id)?;
         if let Err(errs) = persona.validate() {
@@ -1702,7 +1783,7 @@ impl Agent {
         // be wrong after a crash or after a bundle is unpacked from a
         // colleague's machine, and the Sessions directory is the thing the
         // browser itself will be reading a moment later.
-        let start_urls = start_urls_for(&dir, &profile.start_urls);
+        let start_urls = start_urls_for(&dir, &profile.start_urls, &start_page);
 
         // Whatever has been installed for this profile. Read from disk rather
         // than from the database: the directory is what the browser will
@@ -1795,7 +1876,10 @@ impl Agent {
         }
 
         tracing::info!(profile = %profile.name, pid, relay_port, "launched");
-        let mut out = serde_json::json!({ "pid": pid, "relay_port": relay_port });
+        // The probe address travels with the launch result and is kept on the
+        // running entry, so "what does a site see in this profile" can be
+        // opened later without a second launch. See docs/16, 5.16.
+        let mut out = serde_json::json!({ "pid": pid, "relay_port": relay_port, "probe_url": probe_url });
         if let Some((port, ws)) = cdp_endpoint {
             out["debug_port"] = serde_json::json!(port);
             out["ws_endpoint"] = serde_json::json!(ws);
@@ -1946,16 +2030,18 @@ fn blocklist_path(name: &str) -> anyhow::Result<std::path::PathBuf> {
 /// rather than fatal: deleting a list must not make the profiles that referred
 /// to it unlaunchable.
 fn load_blocklists(names: &[String]) -> crate::blocklist::Blocklist {
-    let mut text = String::new();
+    // One file at a time, then merged — not concatenated. An `@allow-only`
+    // directive applies to the file it is in; pasted together, it would turn
+    // the next file's blocked domains into permitted ones.
+    let mut all = crate::blocklist::Blocklist::default();
     for name in names {
         if let Ok(path) = blocklist_path(name) {
             if let Ok(body) = std::fs::read_to_string(&path) {
-                text.push_str(&body);
-                text.push('\n');
+                all.merge(crate::blocklist::Blocklist::parse(&body));
             }
         }
     }
-    crate::blocklist::Blocklist::parse(&text)
+    all
 }
 
 fn str_param(params: &serde_json::Value, name: &str) -> anyhow::Result<String> {
@@ -1999,18 +2085,18 @@ mod tests {
 
         // First launch: what the profile asks for.
         assert_eq!(
-            start_urls_for(&tmp, &["https://shop.example/".to_string()]),
+            start_urls_for(&tmp, &["https://shop.example/".to_string()], "http://fury.invalid/t/"),
             vec!["https://shop.example/".to_string()]
         );
         // First launch with nothing configured: the page that proves the
         // disguise and the exit are working.
-        assert_eq!(start_urls_for(&tmp, &[]), vec![crate::relay::START_URL.to_string()]);
+        assert_eq!(start_urls_for(&tmp, &[], "http://fury.invalid/t/"), vec!["http://fury.invalid/t/".to_string()]);
 
         // Once the browser has been here, the session is the answer and passing
         // anything would stack a duplicate on top of it.
         std::fs::create_dir_all(tmp.join("Default").join("Sessions")).unwrap();
-        assert!(start_urls_for(&tmp, &["https://shop.example/".to_string()]).is_empty());
-        assert!(start_urls_for(&tmp, &[]).is_empty());
+        assert!(start_urls_for(&tmp, &["https://shop.example/".to_string()], "http://fury.invalid/t/").is_empty());
+        assert!(start_urls_for(&tmp, &[], "http://fury.invalid/t/").is_empty());
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

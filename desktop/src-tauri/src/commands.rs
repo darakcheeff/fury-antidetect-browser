@@ -901,6 +901,9 @@ pub struct UiProxy {
     /// hide it from and the operator has to be able to check what they typed.
     pub display: String,
     pub country: Option<String>,
+    /// From the last exit check, when there was one.
+    #[serde(default)]
+    pub last_timezone: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -921,6 +924,9 @@ pub struct UiProfile {
     /// fields, opening a profile and pressing save silently reset both.
     pub timezone: Option<String>,
     pub languages: Option<Vec<String>>,
+    /// Local profiles only; a server row carries none.
+    #[serde(default)]
+    pub blocklists: Vec<String>,
     pub permissions: Vec<String>,
     pub lock: Option<serde_json::Value>,
     /// Only ever true in local mode today: the agent knows what it launched.
@@ -1018,11 +1024,13 @@ async fn local_profiles() -> R<Vec<UiProfile>> {
             proxy: p.proxy.map(|x| UiProxy {
                 display: format!("{}:{}", x.host, x.port),
                 country: x.last_country,
+                last_timezone: x.last_timezone,
                 id: x.id,
                 name: x.name,
                 kind: x.kind,
             }),
             permissions: all_permissions(),
+            blocklists: p.blocklists,
             lock: None,
             running: p.running,
             last_opened_at: p.last_opened_at,
@@ -1063,11 +1071,13 @@ pub async fn profiles(
                 proxy: p.proxy.map(|x| UiProxy {
                     display: format!("{}:{}", x.host, x.port),
                     country: x.last_country,
+                    last_timezone: None,
                     id: x.id,
                     name: x.name,
                     kind: x.kind,
                 }),
                 permissions: all_permissions(),
+                blocklists: p.blocklists,
                 lock: None,
                 running: p.running,
                 last_opened_at: p.last_opened_at,
@@ -1103,11 +1113,13 @@ pub async fn profiles(
                 proxy: p.proxy.map(|x| UiProxy {
                     display: format!("{}:{}", x.host, x.port),
                     country: x.last_country,
+                    last_timezone: None,
                     id: x.id,
                     name: x.name,
                     kind: x.kind,
                 }),
                 permissions: all_permissions(),
+                blocklists: p.blocklists,
                 lock: None,
                 running: p.running,
                 last_opened_at: p.last_opened_at,
@@ -1157,8 +1169,10 @@ pub async fn profiles(
                 kind: x.kind,
                 display: x.display,
                 country: x.country,
+                last_timezone: None,
             }),
             permissions: p.permissions.iter().map(|v| perm_name(v)).collect(),
+            blocklists: Vec::new(),
             lock: p.lock.as_ref().map(|l| serde_json::json!({
                 "user_id": l.user_id.to_string(),
                 "user_email": l.user_email,
@@ -2207,11 +2221,13 @@ pub async fn trash(state: State<'_, AppState>) -> R<Vec<UiProfile>> {
             proxy: p.proxy.map(|x| UiProxy {
                 display: format!("{}:{}", x.host, x.port),
                 country: x.last_country,
+                last_timezone: None,
                 id: x.id,
                 name: x.name,
                 kind: x.kind,
             }),
             permissions: all_permissions(),
+            blocklists: Vec::new(),
             lock: None,
             running: false,
             // Carries the deletion time, not the last launch: in the trash the
@@ -2575,6 +2591,76 @@ pub async fn import_cookies(id: String, cookies: serde_json::Value) -> R<serde_j
     .await?)
 }
 
+// ---- extensions and disk usage -------------------------------------------
+//
+// Four thin commands over IPC methods that have existed since 07.08.2026 and
+// were reachable from nothing: the agent could install a CRX, list them, remove
+// one, and measure or trim a profile, and the desktop had no button for any of
+// it. To the operator, none of it existed.
+
+#[tauri::command]
+pub async fn extensions(profile_id: String) -> R<serde_json::Value> {
+    Ok(crate::agent::call("extensions.list", serde_json::json!({ "profile_id": profile_id })).await?)
+}
+
+/// `crx_b64` is the file the operator chose in the webview. There is no native
+/// file dialog in this shell, so what JavaScript has is bytes, not a path.
+#[tauri::command]
+pub async fn install_extension(profile_id: String, crx_b64: String) -> R<serde_json::Value> {
+    Ok(crate::agent::call(
+        "extensions.install",
+        serde_json::json!({ "profile_id": profile_id, "crx_b64": crx_b64 }),
+    )
+    .await?)
+}
+
+#[tauri::command]
+pub async fn remove_extension(profile_id: String, id: String) -> R<serde_json::Value> {
+    Ok(crate::agent::call(
+        "extensions.remove",
+        serde_json::json!({ "profile_id": profile_id, "id": id }),
+    )
+    .await?)
+}
+
+#[tauri::command]
+pub async fn profile_usage(id: String) -> R<serde_json::Value> {
+    Ok(crate::agent::call("profiles.usage", serde_json::json!({ "id": id })).await?)
+}
+
+/// Refused by the agent while the profile is open; the message says so.
+#[tauri::command]
+pub async fn trim_profile(id: String) -> R<serde_json::Value> {
+    Ok(crate::agent::call("profiles.trim", serde_json::json!({ "id": id })).await?)
+}
+
+// ---- domain lists ---------------------------------------------------------
+//
+// The relay has refused hosts by name since 07.08.2026 and, from 12.09.2026,
+// can be told the opposite — "only these" — with an `@allow-only` line. None
+// of it had a screen: no editor, no way to put a list on a profile. Four
+// commands over the four IPC methods.
+
+#[tauri::command]
+pub async fn blocklists() -> R<serde_json::Value> {
+    Ok(crate::agent::call("blocklists.list", serde_json::json!({})).await?)
+}
+
+#[tauri::command]
+pub async fn read_blocklist(name: String) -> R<serde_json::Value> {
+    Ok(crate::agent::call("blocklists.read", serde_json::json!({ "name": name })).await?)
+}
+
+#[tauri::command]
+pub async fn save_blocklist(name: String, text: String) -> R<serde_json::Value> {
+    Ok(crate::agent::call("blocklists.upsert", serde_json::json!({ "name": name, "text": text })).await?)
+}
+
+#[tauri::command]
+pub async fn delete_blocklist(name: String) -> R<serde_json::Value> {
+    Ok(crate::agent::call("blocklists.delete", serde_json::json!({ "name": name })).await?)
+}
+
 /// Write the server kit out to a directory the operator picks.
 ///
 /// The other half of the self-hosting instructions. They said "from a clone of
@@ -2853,6 +2939,7 @@ pub async fn shared_with_me(state: State<'_, AppState>) -> R<Vec<UiProfile>> {
                 kind: String::new(),
                 display,
                 country: None,
+                last_timezone: None,
             }),
             timezone: None,
             languages: None,
@@ -2864,6 +2951,7 @@ pub async fn shared_with_me(state: State<'_, AppState>) -> R<Vec<UiProfile>> {
                 .filter(|p| fury_shared::rbac::PermSet(r.permissions).has(**p))
                 .map(perm_name)
                 .collect(),
+            blocklists: Vec::new(),
             lock: None,
             running: false,
             last_opened_at: None,

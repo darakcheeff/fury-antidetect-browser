@@ -28,6 +28,9 @@ const P = {
   close: "M18 6 6 18M6 6l12 12",
   refresh: "M20 11a8 8 0 1 0-.6 4M20 5v6h-6",
   pencil: "M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z",
+  /** A puzzle piece: extensions, and what else sits on disk beside the profile. */
+  puzzle:
+    "M10 4a2 2 0 0 1 4 0v1h3a1 1 0 0 1 1 1v3h1a2 2 0 0 1 0 4h-1v4a1 1 0 0 1-1 1h-3v-1a2 2 0 0 0-4 0v1H7a1 1 0 0 1-1-1v-4H5a2 2 0 0 1 0-4h1V6a1 1 0 0 1 1-1h3V4Z",
   /** This machine. A laptop, because "on this machine" is what it means and a
    *  house would mean home. */
   laptop: "M4 6a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v9H4V6ZM2 18h20M9 18h6",

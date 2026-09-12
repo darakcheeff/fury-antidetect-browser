@@ -42,6 +42,8 @@ export interface ProxySummary {
    *  Never masked in local mode — there is nobody to hide it from. */
   display: string;
   country: string | null;
+  /** The exit's zone from the last check, if any — what "follow the exit" resolves to. */
+  last_timezone?: string | null;
 }
 
 export interface LockInfo {
@@ -108,12 +110,37 @@ export interface Profile {
   /** Null means "follow the proxy's exit", resolved at launch. */
   timezone: string | null;
   languages: string[] | null;
+  /** Names of domain lists the relay applies. Local profiles only; absent
+   *  from what a server returns. */
+  blocklists?: string[];
   lock: LockInfo | null;
   permissions: Perm[];
   /** Local mode only: the agent knows what it launched. In team mode a
    *  colleague's browser shows up through `lock`, not here. */
   running: boolean;
   last_opened_at: string | null;
+}
+
+/** A named list of domains the relay refuses — or, with `@allow-only` on its
+ *  first line, the only domains it permits. */
+export interface DomainList {
+  name: string;
+  domains: number;
+  allow_only: boolean;
+}
+
+export interface Extension {
+  id: string;
+  name: string;
+  version: string;
+  path: string;
+}
+
+export interface Usage {
+  total: number;
+  cache: number;
+  keep: number;
+  files: number;
 }
 
 export interface Persona {
@@ -136,6 +163,24 @@ export interface Preview {
   gpu_vendor: string;
   gpu_renderer: string;
   client_hints_platform: string;
+  chrome_version: string;
+  client_hints: string;
+  avail: string;
+  device_pixel_ratio: number;
+  color_depth: number;
+  max_touch_points: number;
+  /** null when the persona has no WebGPU adapter data. */
+  webgpu: string | null;
+  webgl_extensions: number;
+  audio_sample_rate: number;
+  /** null when the persona carries no voice list — the vector then follows the host. */
+  voices: number | null;
+  media_devices: string | null;
+  ui_locale: string;
+  webrtc: string;
+  js_heap_gb: number | null;
+  persona_source: string | null;
+  persona_weight: number;
   fonts: number;
   noise: { canvas: boolean; audio: boolean; client_rects: boolean };
   /** Contradictions that make this device impossible. Non-empty blocks saving:
@@ -153,6 +198,8 @@ export interface LocalProxy {
   password: string | null;
   last_country: string | null;
   last_ip: string | null;
+  /** The exit's zone from the last check; absent from a server-side proxy. */
+  last_timezone?: string | null;
   /** Provider link that hands out a new exit IP. */
   rotate_url: string | null;
   /** Where to ask what the exit looks like; null uses the default. */
@@ -686,6 +733,33 @@ export const api = {
     cookies: unknown[],
   ): Promise<{ imported: number; session_only: number; skipped: number }> =>
     cmd("import_cookies", { id, cookies }),
+  // ---- domain lists ------------------------------------------------------
+
+  blocklists: (): Promise<DomainList[]> => cmd<DomainList[]>("blocklists"),
+  readBlocklist: (name: string): Promise<{ name: string; text: string }> =>
+    cmd("read_blocklist", { name }),
+  saveBlocklist: (name: string, text: string): Promise<DomainList> =>
+    cmd<DomainList>("save_blocklist", { name, text }),
+  deleteBlocklist: (name: string): Promise<unknown> => cmd("delete_blocklist", { name }),
+
+  // ---- extensions and disk usage ----------------------------------------
+
+  /** Installed into one profile. Identity survives cloning — see ext.rs. */
+  extensions: (profileId: string): Promise<Extension[]> =>
+    cmd<Extension[]>("extensions", { profileId }),
+  /** The .crx as base64: the file was chosen in the webview, so bytes are what
+   *  we have. Installing the same extension twice replaces it. */
+  installExtension: (profileId: string, crxB64: string): Promise<Extension> =>
+    cmd<Extension>("install_extension", { profileId, crxB64 }),
+  removeExtension: (profileId: string, id: string): Promise<unknown> =>
+    cmd("remove_extension", { profileId, id }),
+
+  /** How big a profile is on disk and how much of it is cache. */
+  profileUsage: (id: string): Promise<Usage> => cmd<Usage>("profile_usage", { id }),
+  /** Removes caches only. The agent refuses while the profile is open. */
+  trimProfile: (id: string): Promise<{ bytes: number; removed: string[] }> =>
+    cmd("trim_profile", { id }),
+
   exportProject: (id: string, path: string, passphrase: string, withData = true):
     Promise<{ path: string; bytes: number }> =>
     cmd("export_project", { id, path, passphrase, withData }),

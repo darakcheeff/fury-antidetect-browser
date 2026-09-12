@@ -3,7 +3,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useI18n } from "../i18n";
-import { api, type LocalProxy, type Persona, type Preview, type Profile } from "../api";
+import { api, type DomainList, type LocalProxy, type Persona, type Preview, type Profile } from "../api";
 import { Logins } from "./Logins";
 
 // "Logins" only exists for a profile that has been saved: a login belongs to a
@@ -118,6 +118,10 @@ export function ProfileDialog({
   const [languages, setLanguages] = useState((editing?.languages ?? []).join(", "));
   const [startUrls, setStartUrls] = useState("");
   const [notes, setNotes] = useState("");
+  // Domain lists the relay applies to this profile. Local profiles only — a
+  // team profile's record lives on the server, which does not carry them.
+  const [lists, setLists] = useState<DomainList[]>([]);
+  const [blocklists, setBlocklists] = useState<string[]>(editing?.blocklists ?? []);
 
   useEffect(() => {
     void api.personas().then((p) => {
@@ -125,6 +129,7 @@ export function ProfileDialog({
       setPersonaId((current) => current || pickWeighted(p) || "");
     });
     void api.proxies().then(setProxies);
+    void api.blocklists().then(setLists).catch(() => setLists([]));
   }, []);
 
   // Recomputed on every change rather than on a "preview" button: a value you
@@ -204,6 +209,7 @@ export function ProfileDialog({
         timezone: timezone.trim() || null,
         languages: languages.trim() ? splitList(languages) : null,
         start_urls: splitList(startUrls, "\n"),
+        blocklists,
         last_opened_at: null,
       },
       // Where to save it. An existing profile goes back where it came from --
@@ -287,6 +293,32 @@ export function ProfileDialog({
                     <p className="hint">{t("pd.startUrlsHint")}</p>
                   </div>
                 </div>
+                {lists.length > 0 && (
+                  <div className="field">
+                    <label>{t("pd.domainLists")}</label>
+                    <div>
+                      {lists.map((l) => (
+                        <label key={l.name} className="row" style={{ marginBottom: "var(--s-1)" }}>
+                          <input
+                            type="checkbox"
+                            style={{ width: 14, height: 14, accentColor: "var(--accent)" }}
+                            checked={blocklists.includes(l.name)}
+                            onChange={(e) =>
+                              setBlocklists((cur) =>
+                                e.target.checked ? [...cur, l.name] : cur.filter((n) => n !== l.name),
+                              )
+                            }
+                          />
+                          {l.name}
+                          <span className="muted small">
+                            {l.allow_only ? t("pd.listAllowOnly", { n: l.domains }) : t("pd.listBlocks", { n: l.domains })}
+                          </span>
+                        </label>
+                      ))}
+                      <p className="hint">{t("pd.domainListsHint")}</p>
+                    </div>
+                  </div>
+                )}
                 <div className="field">
                   <label htmlFor="p-notes">{t("pd.notes")}</label>
                   <div>
@@ -565,22 +597,66 @@ export function ProfileDialog({
                   <dd>{preview.platform}</dd>
                   <dt>{t("pd.ovUserAgent")}</dt>
                   <dd className="mono small">{preview.user_agent}</dd>
+                  <dt>{t("pd.ovChrome")}</dt>
+                  <dd>{preview.chrome_version}</dd>
+                  <dt>{t("pd.ovClientHints")}</dt>
+                  <dd className="small">{preview.client_hints}</dd>
                   <dt>{t("pd.ovScreen")}</dt>
-                  <dd>{preview.screen}</dd>
+                  <dd>
+                    {preview.screen}
+                    <span className="muted small">
+                      {" "}{t("pd.ovScreenDetail", { avail: preview.avail, dpr: preview.device_pixel_ratio, depth: preview.color_depth })}
+                    </span>
+                  </dd>
                   <dt>{t("pd.ovGpu")}</dt>
-                  <dd className="small">{preview.gpu_renderer}</dd>
+                  <dd className="small">
+                    {preview.gpu_renderer}
+                    <div className="muted">{preview.gpu_vendor} · {t("pd.ovWebglExt", { n: preview.webgl_extensions })}</div>
+                  </dd>
+                  <dt>{t("pd.ovWebgpu")}</dt>
+                  <dd>{preview.webgpu ?? t("pd.ovFollowsHost")}</dd>
                   <dt>{t("pd.ovCpuRam")}</dt>
                   <dd>
                     {t("pd.ovCores", { n: preview.hardware_concurrency, gb: preview.device_memory })}
+                    {preview.js_heap_gb !== null && (
+                      <span className="muted small"> · {t("pd.ovHeap", { gb: preview.js_heap_gb })}</span>
+                    )}
                   </dd>
+                  <dt>{t("pd.ovTouch")}</dt>
+                  <dd>{preview.max_touch_points}</dd>
                   <dt>{t("pd.ovTimezone")}</dt>
-                  <dd>{preview.timezone}</dd>
+                  <dd>
+                    {timezone.trim()
+                      ? preview.timezone
+                      : t("pd.ovFollowsExit", {
+                          tz: pxCheck?.timezone
+                            ?? proxies.find((x) => x.id === proxyId)?.last_timezone
+                            ?? editing?.proxy?.last_timezone
+                            ?? "?",
+                        })}
+                  </dd>
                   <dt>{t("pd.ovLanguages")}</dt>
-                  <dd>{preview.languages.join(", ")}</dd>
-                  <dt>{t("pd.ovClientHints")}</dt>
-                  <dd>{preview.client_hints_platform}</dd>
+                  <dd>
+                    {preview.languages.join(", ")}
+                    <span className="muted small"> · {t("pd.ovUiLocale", { l: preview.ui_locale })}</span>
+                  </dd>
                   <dt>{t("pd.ovFonts")}</dt>
                   <dd>{preview.fonts}</dd>
+                  <dt>{t("pd.ovAudio")}</dt>
+                  <dd>{t("pd.ovAudioRate", { hz: preview.audio_sample_rate })}</dd>
+                  <dt>{t("pd.ovVoices")}</dt>
+                  <dd>{preview.voices ?? t("pd.ovFollowsHost")}</dd>
+                  <dt>{t("pd.ovMedia")}</dt>
+                  <dd>{preview.media_devices ?? t("pd.ovFollowsHost")}</dd>
+                  <dt>{t("pd.ovWebrtc")}</dt>
+                  <dd className="small">{preview.webrtc}</dd>
+                  <dt>{t("pd.ovGeo")}</dt>
+                  <dd className="small">{t("pd.ovGeoFollows")}</dd>
+                  <dt>{t("pd.ovSource")}</dt>
+                  <dd className="small">
+                    {preview.persona_source === "measured" ? t("pd.measured") : t("pd.derived")}
+                    {" · "}{t("pd.ovWeight", { pct: (preview.persona_weight * 100).toFixed(1) })}
+                  </dd>
                   <dt>{t("pd.ovNoise")}</dt>
                   <dd>
                     {[

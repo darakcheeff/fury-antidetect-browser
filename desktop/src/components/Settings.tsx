@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright 2026 Bogdan Shapovalov and the Fury authors
 
-import { useState } from "react";
-import { api, type Shell } from "../api";
+import { useEffect, useState } from "react";
+import { api, type DomainList, type Shell } from "../api";
 import { languages, useI18n, type Language } from "../i18n";
 import { type Theme, themes, useTheme } from "../theme";
 
@@ -251,6 +251,8 @@ export function Settings({
                 </div>
               )}
 
+              <DomainLists />
+
               <div className="settingsGroup">
                 <h2>{t("set.thisMachine")}</h2>
                 <dl className="kv">
@@ -468,5 +470,151 @@ function About({ shell }: { shell: Shell }) {
         </dl>
       </div>
     </>
+  );
+}
+
+/** The relay's domain lists: pasted text, saved under a name, chosen per
+ *  profile in its editor.
+ *
+ *  This screen is the whole of the feature's interface, and it is dated
+ *  12.09.2026 while blocklist.rs is dated 07.08.2026: the relay refused hosts
+ *  for five weeks with no way for anyone to tell it which. The audit in
+ *  docs/12 found the same shape three times in one day — extensions, disk
+ *  usage, this — and the lesson recorded there applies: a feature the operator
+ *  cannot reach is a feature the product does not have. */
+function DomainLists() {
+  const { t, say } = useI18n();
+  const [lists, setLists] = useState<DomainList[]>([]);
+  const [name, setName] = useState("");
+  const [text, setText] = useState("");
+  const [isNew, setIsNew] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const reload = async () => {
+    try {
+      setLists(await api.blocklists());
+    } catch (e) {
+      setError(say(e));
+    }
+  };
+  useEffect(() => {
+    void reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const pick = async (n: string) => {
+    setNote(null);
+    setError(null);
+    if (n === "") {
+      setIsNew(true);
+      setName("");
+      setText("");
+      return;
+    }
+    setIsNew(false);
+    setName(n);
+    try {
+      setText((await api.readBlocklist(n)).text);
+    } catch (e) {
+      setError(say(e));
+    }
+  };
+
+  return (
+    <div className="settingsGroup">
+      <h2>{t("set.domainLists")}</h2>
+      <p className="hint">{t("set.domainListsHint")}</p>
+      <div className="field">
+        <label htmlFor="dl-pick">{t("set.listName")}</label>
+        <div>
+          <select id="dl-pick" value={isNew ? "" : name} onChange={(e) => void pick(e.target.value)}>
+            <option value="">{t("set.listNew")}</option>
+            {lists.map((l) => (
+              <option key={l.name} value={l.name}>
+                {l.name} — {l.allow_only ? t("pd.listAllowOnly", { n: l.domains }) : t("pd.listBlocks", { n: l.domains })}
+              </option>
+            ))}
+          </select>
+          {isNew && (
+            <>
+              <input
+                style={{ marginTop: "var(--s-2)" }}
+                value={name}
+                placeholder="ads"
+                onChange={(e) => setName(e.target.value)}
+              />
+              <p className="hint">{t("set.listNameHint")}</p>
+            </>
+          )}
+        </div>
+      </div>
+      <div className="field">
+        <label htmlFor="dl-text">{t("set.listText")}</label>
+        <div>
+          <textarea
+            id="dl-text"
+            rows={8}
+            value={text}
+            spellCheck={false}
+            style={{ width: "100%", fontFamily: "var(--mono)", fontSize: 12 }}
+            placeholder={"@allow-only\nfacebook.com\n||fbcdn.net^"}
+            onChange={(e) => setText(e.target.value)}
+          />
+          <div style={{ display: "flex", gap: "var(--s-2)", marginTop: "var(--s-2)" }}>
+            <button
+              className="primary"
+              disabled={busy || !name.trim() || !text.trim()}
+              onClick={async () => {
+                setBusy(true);
+                setError(null);
+                setNote(null);
+                try {
+                  const saved = await api.saveBlocklist(name.trim(), text);
+                  setNote(
+                    t("set.listSaved", {
+                      n: saved.domains,
+                      mode: saved.allow_only ? t("set.listModeAllow") : "",
+                    }),
+                  );
+                  setIsNew(false);
+                  await reload();
+                } catch (e) {
+                  setError(say(e));
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              {t("set.listSave")}
+            </button>
+            {!isNew && (
+              <button
+                className="ghost danger"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  setError(null);
+                  try {
+                    await api.deleteBlocklist(name);
+                    await pick("");
+                    await reload();
+                  } catch (e) {
+                    setError(say(e));
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                {t("set.listDelete")}
+              </button>
+            )}
+          </div>
+          {note && <p>{note}</p>}
+          {error && <p className="error">{error}</p>}
+        </div>
+      </div>
+    </div>
   );
 }

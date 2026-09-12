@@ -55,6 +55,10 @@ pub struct LocalProxy {
     pub host: String,
     pub port: u16,
     pub last_country: Option<String>,
+    /// The exit's zone from the last check, for the editor to name what
+    /// "follow the exit" will resolve to.
+    #[serde(default)]
+    pub last_timezone: Option<String>,
     /// Only ever filled for a proxy of THIS machine's, where the agent keeps
     /// them readable because there is nobody to hide them from.
     ///
@@ -91,6 +95,10 @@ pub struct LocalProfile {
     pub timezone: Option<String>,
     #[serde(default)]
     pub languages: Option<Vec<String>>,
+    /// Domain lists the relay applies. The first UI for them (12.09.2026)
+    /// showed every box unchecked because this field was not carried here.
+    #[serde(default)]
+    pub blocklists: Vec<String>,
     #[serde(default)]
     pub running: bool,
     pub last_opened_at: Option<String>,

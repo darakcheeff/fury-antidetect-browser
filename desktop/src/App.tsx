@@ -8,6 +8,7 @@ import { Login } from "./components/Login";
 import { ProfileDialog } from "./components/ProfileDialog";
 import { BulkProfiles } from "./components/BulkProfiles";
 import { Cookies } from "./components/Cookies";
+import { Extensions } from "./components/Extensions";
 import { useAsk } from "./components/Ask";
 import { CommandPalette, type Command } from "./components/CommandPalette";
 import { ProfileTable, isOpenHere } from "./components/ProfileTable";
@@ -53,6 +54,7 @@ export function App() {
   /** `undefined` closed, `null` making new ones, a profile means copying it. */
   const [bulk, setBulk] = useState<Profile | null | undefined>(undefined);
   const [cookiesFor, setCookiesFor] = useState<Profile | null>(null);
+  const [extFor, setExtFor] = useState<Profile | null>(null);
   const [view, setView] = useState<View>("profiles");
   const [openOnly, setOpenOnly] = useState(false);
   /** A line of information at the top of the window, and — when it is about a
@@ -1032,6 +1034,7 @@ export function App() {
               onLaunch={onLaunch}
               onStop={onStop}
               onEdit={setEditing}
+              onExtensions={setExtFor}
               /* Offered always, and gated per row rather than per mode.
                  It used to be handed over only in local mode, so connecting to
                  a server removed the delete button from EVERY row -- including
@@ -1137,6 +1140,13 @@ export function App() {
 
         {cookiesFor && (
           <Cookies profile={cookiesFor} onClose={() => setCookiesFor(null)} />
+        )}
+        {extFor && (
+          <Extensions
+            profile={extFor}
+            running={isOpenHere(extFor, { local, userId: me?.user_id, machine: shell.machine_name })}
+            onClose={() => setExtFor(null)}
+          />
         )}
       </main>
     </div>

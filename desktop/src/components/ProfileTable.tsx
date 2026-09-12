@@ -46,6 +46,7 @@ export function ProfileTable({
   onStop,
   onEdit,
   onDelete,
+  onExtensions,
   selected,
   onToggle,
   onToggleAll,
@@ -62,6 +63,8 @@ export function ProfileTable({
    *  live, and that screen does not exist yet. */
   onEdit?: (p: Profile) => void;
   onDelete?: (p: Profile) => void;
+  /** Extensions and disk usage — the two things beside the browser data. */
+  onExtensions?: (p: Profile) => void;
   selected: Set<string>;
   onToggle: (id: string) => void;
   onToggleAll: () => void;
@@ -237,6 +240,9 @@ export function ProfileTable({
                     rare and irreversible. The icons carry title and aria-label,
                     so the name is a hover away and a screen reader still gets
                     a word rather than a glyph. */}
+                {onExtensions && canEdit && (
+                  <IconButton icon="puzzle" label={t("ext.extensions")} disabled={busy} onClick={() => onExtensions(p)} />
+                )}
                 {onEdit && canEdit && (
                   <IconButton icon="pencil" label={t("row.edit")} disabled={busy} onClick={() => onEdit(p)} />
                 )}

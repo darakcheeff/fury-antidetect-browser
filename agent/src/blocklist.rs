@@ -38,12 +38,34 @@
 //! at most a handful of labels, so this is a handful of hash lookups rather
 //! than a walk over a hundred thousand patterns.
 
+//!
+//! ## The other direction
+//!
+//! A list that begins with the line `@allow-only` is read inside out: the
+//! domains in it are the ONLY ones the profile may reach, and everything else
+//! is refused. This is what a team wants for a member who should open the one
+//! platform their profile exists for and nothing beside it — AdsPower sells it
+//! as "site management" per member group (docs/12, audit of 12.09.2026). Same
+//! matcher, same place in the relay, one flag.
+//!
+//! A profile can carry both kinds. Then the union of its allow-only lists is
+//! the whitelist and the union of its ordinary lists is still subtracted from
+//! it: allowed AND not blocked.
+
 use std::collections::HashSet;
+
+/// The line that turns a list into a whitelist. Written with a character no
+/// hosts file, Adblock rule or domain can begin with, so no existing list is
+/// reinterpreted by accident.
+pub const ALLOW_ONLY: &str = "@allow-only";
 
 /// A set of domains, and everything below them.
 #[derive(Debug, Default, Clone)]
 pub struct Blocklist {
     domains: HashSet<String>,
+    /// `Some` once any allow-only list has been merged in: the domains a
+    /// profile may reach. `None` means no restriction beyond `domains`.
+    allowed: Option<HashSet<String>>,
 }
 
 impl Blocklist {
@@ -64,9 +86,14 @@ impl Blocklist {
     /// pretending it is would block more than it says.
     pub fn parse(text: &str) -> Blocklist {
         let mut domains = HashSet::new();
+        let mut allow_only = false;
         for raw in text.lines() {
             let line = raw.split('#').next().unwrap_or("").trim();
             if line.is_empty() || line.starts_with('!') {
+                continue;
+            }
+            if line.eq_ignore_ascii_case(ALLOW_ONLY) {
+                allow_only = true;
                 continue;
             }
 
@@ -95,36 +122,74 @@ impl Blocklist {
                 domains.insert(d);
             }
         }
-        Blocklist { domains }
+        if allow_only {
+            Blocklist { domains: HashSet::new(), allowed: Some(domains) }
+        } else {
+            Blocklist { domains, allowed: None }
+        }
     }
 
+    /// Fold another list into this one: blocked domains union, allowed
+    /// domains union. A profile's lists are read one file at a time so that
+    /// an `@allow-only` in one of them cannot turn a neighbouring blocklist's
+    /// domains into permissions, which concatenating the texts would do.
+    pub fn merge(&mut self, other: Blocklist) {
+        self.domains.extend(other.domains);
+        if let Some(theirs) = other.allowed {
+            self.allowed.get_or_insert_with(HashSet::new).extend(theirs);
+        }
+    }
+
+    /// How many domains are named, whichever way they are read.
     pub fn len(&self) -> usize {
-        self.domains.len()
+        self.domains.len() + self.allowed.as_ref().map_or(0, HashSet::len)
     }
 
     pub fn is_empty(&self) -> bool {
-        self.domains.is_empty()
+        self.domains.is_empty() && self.allowed.is_none()
     }
 
-    /// Is this host blocked, by itself or by one of its parents?
+    /// Does this list read as a whitelist?
+    pub fn is_allow_only(&self) -> bool {
+        self.allowed.is_some()
+    }
+
+    /// Is this host refused — named in a blocklist, or absent from a whitelist
+    /// the profile carries?
     pub fn blocks(&self, host: &str) -> bool {
-        if self.domains.is_empty() {
+        if self.is_empty() {
             return false;
         }
-        let Some(host) = normalise(host) else { return false };
-
-        // The name, then each parent. `a.b.example.com` asks for
-        // `a.b.example.com`, `b.example.com`, `example.com`, `com` — four
-        // lookups, not a hundred thousand comparisons.
-        let mut rest: &str = &host;
-        loop {
-            if self.domains.contains(rest) {
+        let Some(host) = normalise(host) else {
+            // Not a name this can match: an IP literal, a single label. A
+            // whitelist refuses it — "only these domains" cannot admit what
+            // it cannot name — and a blocklist lets it through, as before.
+            return self.allowed.is_some();
+        };
+        if let Some(allowed) = &self.allowed {
+            if !matches_or_parent(allowed, &host) {
                 return true;
             }
-            match rest.split_once('.') {
-                Some((_, parent)) if parent.contains('.') || !parent.is_empty() => rest = parent,
-                _ => return false,
-            }
+        }
+        matches_or_parent(&self.domains, &host)
+    }
+}
+
+/// The name, then each parent. `a.b.example.com` asks for `a.b.example.com`,
+/// `b.example.com`, `example.com`, `com` — four lookups, not a hundred
+/// thousand comparisons.
+fn matches_or_parent(set: &HashSet<String>, host: &str) -> bool {
+    if set.is_empty() {
+        return false;
+    }
+    let mut rest: &str = host;
+    loop {
+        if set.contains(rest) {
+            return true;
+        }
+        match rest.split_once('.') {
+            Some((_, parent)) if !parent.is_empty() => rest = parent,
+            _ => return false,
         }
     }
 }
@@ -156,6 +221,41 @@ fn normalise(raw: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn allow_only_reads_the_list_inside_out() {
+        let list = Blocklist::parse("@allow-only\nfacebook.com\n||fbcdn.net^\n");
+        assert!(list.is_allow_only());
+        assert_eq!(list.len(), 2);
+        for ok in ["facebook.com", "www.facebook.com", "static.xx.fbcdn.net"] {
+            assert!(!list.blocks(ok), "{ok} is the platform and must open");
+        }
+        for no in ["google.com", "notfacebook.com", "facebook.com.evil.example", "10.0.0.1"] {
+            assert!(list.blocks(no), "{no} is not on the list and must be refused");
+        }
+    }
+
+    #[test]
+    fn a_whitelist_and_a_blocklist_on_one_profile_compose() {
+        let mut list = Blocklist::parse("@allow-only\nfacebook.com\n");
+        list.merge(Blocklist::parse("pixel.facebook.com\n"));
+        assert!(!list.blocks("www.facebook.com"));
+        assert!(list.blocks("pixel.facebook.com"), "allowed by the whitelist, then subtracted");
+        assert!(list.blocks("example.com"));
+        // Merging two whitelists widens, never narrows.
+        list.merge(Blocklist::parse("@allow-only\ninstagram.com\n"));
+        assert!(!list.blocks("instagram.com"));
+        assert!(!list.blocks("www.facebook.com"));
+    }
+
+    #[test]
+    fn the_directive_is_not_a_domain_and_is_case_insensitive() {
+        let list = Blocklist::parse("@ALLOW-ONLY\nexample.com\n");
+        assert!(list.is_allow_only());
+        assert_eq!(list.len(), 1);
+        // No directive: an ordinary list, as every existing file is.
+        assert!(!Blocklist::parse("example.com\n").is_allow_only());
+    }
 
     #[test]
     fn the_three_formats_a_published_list_comes_in() {

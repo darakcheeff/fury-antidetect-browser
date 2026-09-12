@@ -145,9 +145,12 @@ async fn cmd_relay(args: &[String]) -> anyhow::Result<()> {
     let upstream = parse_upstream(url)?;
     tracing::info!(?upstream, "starting relay");
 
-    let (bound, handle) = Relay::new(upstream).serve(port).await?;
+    let relay = Relay::new(upstream);
+    let start = relay.start_url();
+    let (bound, handle) = relay.serve(port).await?;
     tracing::info!(
         port = bound,
+        start_page = %start,
         "relay listening — launch the core with --proxy-server=http://127.0.0.1:{bound}"
     );
 

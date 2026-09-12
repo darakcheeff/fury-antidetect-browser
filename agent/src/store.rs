@@ -158,7 +158,9 @@ pub struct Profile {
     /// should be able to do.
     #[serde(default)]
     pub proxy_id: Option<String>,
-    /// `None` means "follow the proxy's exit" once that resolution lands.
+    /// `None` means "follow the proxy's exit": resolved at every launch in
+    /// `ipc.rs` (timezone, languages and position, from one lookup), never
+    /// written back here, so a proxy that moves moves the profile with it.
     pub timezone: Option<String>,
     pub languages: Option<Vec<String>>,
     pub start_urls: Vec<String>,

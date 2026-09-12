@@ -100,12 +100,30 @@ pub struct Relay {
     /// Hosts this profile refuses to talk to. Empty for most profiles, and
     /// then it costs one `is_empty` per connection.
     blocked: std::sync::Arc<crate::blocklist::Blocklist>,
+    /// The secret in the start page's path. See `is_ours`.
+    token: String,
+    /// Set once by `serve`, read by `is_ours`: the port the probe answers on.
+    port: std::sync::OnceLock<u16>,
 }
 
 impl Relay {
     pub fn new(upstream: Upstream) -> Self {
-        Self { upstream, blocked: Default::default() }
+        // Sixteen random bytes as hex. A page can enumerate paths on a host it
+        // can name; it cannot enumerate 128 bits.
+        let token: String = (0..16)
+            .map(|_| format!("{:02x}", rand::random::<u8>()))
+            .collect();
+        Self { upstream, blocked: Default::default(), token, port: Default::default() }
     }
+
+    /// Where the launcher points the first tab. Carries the token, and the
+    /// token is what makes the page answer: `http://fury.invalid/` on its own
+    /// is forwarded upstream like any other name and fails the way a name that
+    /// does not resolve fails through any proxy.
+    pub fn start_url(&self) -> String {
+        format!("http://{START_HOST}/{}/", self.token)
+    }
+
 
     /// Refuse connections to these hosts.
     ///
@@ -123,6 +141,11 @@ impl Relay {
 
     /// Bind on loopback only and serve until the returned handle is dropped.
     /// Port 0 asks the OS for a free port, which is what the launcher uses.
+    /// The probe's address for the start page's link, once there is a port.
+    fn probe_href(&self) -> Option<String> {
+        self.port.get().map(|p| format!("http://127.0.0.1:{p}/{}/probe/", self.token))
+    }
+
     /// How to name this profile's exit on the start page.
     ///
     /// Host and port only — never the credentials. The page is rendered inside
@@ -145,6 +168,7 @@ impl Relay {
     pub async fn serve(self, port: u16) -> anyhow::Result<(u16, tokio::task::JoinHandle<()>)> {
         let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], port))).await?;
         let bound = listener.local_addr()?.port();
+        let _ = self.port.set(bound);
         let this = Arc::new(self);
 
         let handle = tokio::spawn(async move {
@@ -179,16 +203,39 @@ impl Relay {
         // Serving it from the relay keeps that entirely local: the check that
         // the proxy works happens inside the same component that provides the
         // proxy, and nothing about the launch leaves the machine.
-        if method != "CONNECT" && is_start_page(&target, &head) {
-            let body = start_page(&self.upstream_label());
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\
-                 Content-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
-                body.len()
-            );
-            client.write_all(response.as_bytes()).await?;
-            client.write_all(body.as_bytes()).await?;
-            return Ok(());
+        //
+        // And answered ONLY on the tokened path. The first version answered
+        // every request for `fury.invalid`, which handed any page in the
+        // profile a one-line test: `fetch("http://fury.invalid/", {mode:
+        // "no-cors"})` resolves here and throws in every real browser, whose
+        // resolver has never heard of the name. With the token, a request
+        // without it goes upstream like any other host and fails the way an
+        // unresolvable name fails through any proxy — which is what a real
+        // Chrome behind a real proxy does.
+        if method != "CONNECT" {
+            if let Some(route) = self.route(&target, &head) {
+                let (status, content_type, body): (&str, &str, std::borrow::Cow<'static, str>) = match route {
+                    Route::Start => (
+                        "200 OK",
+                        "text/html; charset=utf-8",
+                        start_page(&self.upstream_label(), self.probe_href().as_deref()).into(),
+                    ),
+                    Route::Probe => ("200 OK", "text/html; charset=utf-8", PROBE_HTML.into()),
+                    Route::ProbeJs => ("200 OK", "application/javascript; charset=utf-8", PROBE_JS.into()),
+                    Route::ProbeSw => ("200 OK", "application/javascript; charset=utf-8", PROBE_SW.into()),
+                    // The probe page offers to POST its dump to a collector;
+                    // there is none here, and the page says so when told.
+                    Route::Missing => ("404 Not Found", "text/plain; charset=utf-8", "".into()),
+                };
+                let response = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\n\
+                     Content-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                client.write_all(response.as_bytes()).await?;
+                client.write_all(body.as_bytes()).await?;
+                return Ok(());
+            }
         }
 
         // CONNECT is the HTTPS path and by far the common case.
@@ -213,6 +260,24 @@ impl Relay {
             tracing::debug!(target = %host, "blocked by the profile's list");
             let _ = client
                 .write_all(b"HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n")
+                .await;
+            return Ok(());
+        }
+
+        // Nothing on this machine or its network is reachable from a profile.
+        //
+        // Measured 12.09.2026 from https://example.com inside a profile whose
+        // upstream was a proxy on the same machine — which is what a VPN
+        // client's local SOCKS port is: `fetch("http://127.0.0.1:35000/…")`
+        // resolved, and a closed port threw. That is the agent's own API
+        // announcing itself to any site that asks. The relay's tokened routes
+        // were answered above; everything else aimed at loopback, link-local or
+        // RFC 1918 space fails HERE, on the same path as an unreachable
+        // upstream, so an open port and a closed one are indistinguishable.
+        if is_local_target(&host) {
+            tracing::debug!(target = %host, "local address refused");
+            let _ = client
+                .write_all(b"HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n")
                 .await;
             return Ok(());
         }
@@ -529,13 +594,93 @@ fn escape_html(raw: &str) -> String {
         .collect()
 }
 
-/// Is this a request for the profile's own start page?
-fn is_start_page(target: &str, head: &str) -> bool {
-    let host = absolute_uri_host(target)
-        .or_else(|| header_host(head))
-        .unwrap_or_default();
-    host.split(':').next().unwrap_or_default() == START_HOST
+/// What the relay answers itself, on the tokened path of either of its two
+/// names: `fury.invalid` (the start page) and its own loopback address (the
+/// probe, which needs a secure context — see `probe_url`).
+#[derive(Debug, PartialEq)]
+enum Route {
+    Start,
+    Probe,
+    ProbeJs,
+    ProbeSw,
+    /// Ours by host and token, but no such page.
+    Missing,
 }
+
+impl Relay {
+    fn route(&self, target: &str, head: &str) -> Option<Route> {
+        let host = absolute_uri_host(target)
+            .or_else(|| header_host(head))
+            .unwrap_or_default();
+        let ours = is_ours(&host, self.port.get().copied());
+        if !ours {
+            return None;
+        }
+        // The path, whichever form the request line took.
+        let path = target
+            .strip_prefix("http://")
+            .and_then(|r| r.find('/').map(|i| &r[i..]))
+            .unwrap_or(target);
+        let path = path.split('?').next().unwrap_or(path);
+        let rest = path.strip_prefix('/')?.strip_prefix(self.token.as_str())?;
+        Some(match rest {
+            "/" | "" => Route::Start,
+            "/probe/" | "/probe" => Route::Probe,
+            "/probe/probe.js" => Route::ProbeJs,
+            "/probe/sw-probe.js" => Route::ProbeSw,
+            _ => Route::Missing,
+        })
+    }
+}
+
+/// Loopback, link-local, RFC 1918 or a name for this machine — anything a
+/// page must not be able to reach through the profile. Names other than
+/// `localhost` are not resolved here (the relay never resolves; that is the
+/// upstream's job), so a LAN hostname passes — the upstream, if it is remote,
+/// cannot reach it anyway, and if it is local this is the residual gap.
+fn is_local_target(host: &str) -> bool {
+    let h = host.trim_start_matches('[').trim_end_matches(']').to_ascii_lowercase();
+    if h == "localhost" || h.ends_with(".localhost") || h.ends_with(".local") {
+        return true;
+    }
+    if let Ok(v4) = h.parse::<std::net::Ipv4Addr>() {
+        let o = v4.octets();
+        return v4.is_loopback()
+            || v4.is_private()
+            || v4.is_link_local()
+            || v4.is_unspecified()
+            || (o[0] == 100 && (64..=127).contains(&o[1])); // carrier-grade NAT
+    }
+    if let Ok(v6) = h.parse::<std::net::Ipv6Addr>() {
+        let seg = v6.segments();
+        return v6.is_loopback()
+            || v6.is_unspecified()
+            || (seg[0] & 0xfe00) == 0xfc00 // unique local
+            || (seg[0] & 0xffc0) == 0xfe80 // link-local
+            || v6.to_ipv4_mapped().is_some_and(|m| is_local_target(&m.to_string()));
+    }
+    false
+}
+
+/// Is this host one of the relay's own two names?
+fn is_ours(host: &str, port: Option<u16>) -> bool {
+    let (name, p) = match host.rsplit_once(':') {
+        Some((n, p)) => (n, p.parse::<u16>().ok()),
+        None => (host, None),
+    };
+    if name == START_HOST {
+        return true;
+    }
+    matches!((name, p, port), ("127.0.0.1" | "localhost", Some(a), Some(b)) if a == b)
+}
+
+/// The detect-suite probe, carried in the binary so a profile can be asked
+/// "what does a site see" without a collector, a checkout or a network. The
+/// same files CI captures baselines with: tools/detect-suite is the one place
+/// the probe is written.
+const PROBE_HTML: &str = include_str!("../../tools/detect-suite/probe.html");
+const PROBE_JS: &str = include_str!("../../tools/detect-suite/probe.js");
+const PROBE_SW: &str = include_str!("../../tools/detect-suite/sw-probe.js");
 
 /// The hostname the start page answers on.
 ///
@@ -543,7 +688,6 @@ fn is_start_page(target: &str, head: &str) -> bool {
 /// this interception ever failed to fire, the request would fail loudly instead
 /// of quietly reaching a real site of that name.
 pub const START_HOST: &str = "fury.invalid";
-pub const START_URL: &str = "http://fury.invalid/";
 
 fn parse_request_line(head: &str) -> Option<(String, String)> {
     let line = head.lines().next()?;
@@ -633,11 +777,17 @@ fn base64(input: &[u8]) -> String {
 /// Everything it reports is measured in the page itself, by the browser being
 /// tested — which is the only way to check a disguise: what the operator needs
 /// to see is what a site would see, not what the configuration intended.
-fn start_page(exit: &str) -> String {
+fn start_page(exit: &str, probe: Option<&str>) -> String {
     // Escaped here rather than by the caller. The function that interpolates is
     // the one that has to be safe: a caller that forgets is a bug nobody sees
     // until a proxy hostname contains a bracket.
     let exit = escape_html(exit);
+    // The full detect-suite probe, one click away. The page above measures ten
+    // things; the probe measures every vector the suite knows, across workers
+    // and iframes, in a secure context — see `Route::Probe`.
+    let probe = probe
+        .map(|href| format!(r#"<p class="sub" style="margin-top:8px"><a href="{}" style="color:#e0552f">Full probe — every vector, every context →</a></p>"#, escape_html(href)))
+        .unwrap_or_default();
     format!(
         r##"<!doctype html><meta charset="utf-8"><title>Fury</title>
 <style>
@@ -665,6 +815,7 @@ fn start_page(exit: &str) -> String {
  <dl id="facts"></dl>
  <div id="verdict" class="v"></div>
  <p class="sub" style="margin-top:20px">Exit: <code>{exit}</code></p>
+ {probe}
 </main>
 <script>
 const g=(f)=>{{try{{return f()}}catch(e){{return "—"}}}};
@@ -752,6 +903,20 @@ mod tests {
 
 
     #[test]
+    fn nothing_on_this_machine_or_its_network_is_a_target() {
+        for h in [
+            "127.0.0.1", "127.8.8.8", "localhost", "LOCALHOST", "foo.localhost", "printer.local",
+            "10.0.0.5", "192.168.1.1", "172.16.0.1", "172.31.255.255", "169.254.169.254",
+            "100.64.0.1", "0.0.0.0", "::1", "fe80::1", "fd00::1", "::ffff:127.0.0.1",
+        ] {
+            assert!(is_local_target(h), "{h} should be refused");
+        }
+        for h in ["example.com", "8.8.8.8", "172.32.0.1", "2001:db8::1", "fury.invalid", "11.0.0.1"] {
+            assert!(!is_local_target(h), "{h} should pass");
+        }
+    }
+
+    #[test]
     fn a_proxy_password_never_reaches_a_log_line() {
         // Every launch and every proxy check logs the upstream at INFO. The
         // derived Debug put the password in that line.
@@ -789,19 +954,35 @@ mod tests {
 
     #[test]
     fn the_start_page_is_recognised_however_it_is_addressed() {
-        assert!(is_start_page("http://fury.invalid/", ""));
-        assert!(is_start_page("/", "Host: fury.invalid\r\n"));
-        assert!(is_start_page("http://fury.invalid:80/x", ""));
-        // And nothing else is intercepted, or a real site could be shadowed.
-        assert!(!is_start_page("http://example.com/", ""));
-        assert!(!is_start_page("http://notfury.invalid/", ""));
+        let r = Relay::new(Upstream::Http { host: "h".into(), port: 1, auth: None });
+        let t = r.token.clone();
+        // With the token: answered, in both request forms.
+        assert_eq!(r.route(&format!("http://fury.invalid/{t}/"), ""), Some(Route::Start));
+        assert_eq!(r.route(&format!("/{t}/"), "Host: fury.invalid\r\n"), Some(Route::Start));
+        assert_eq!(r.route(&format!("http://fury.invalid:80/{t}/probe/"), ""), Some(Route::Probe));
+        assert_eq!(r.route(&format!("http://fury.invalid/{t}/probe/probe.js?x=1"), ""), Some(Route::ProbeJs));
+        assert_eq!(r.route(&format!("http://fury.invalid/{t}/nothing"), ""), Some(Route::Missing));
+        // Without it: NOT ours. Forwarded upstream and failing there is what a
+        // real browser behind a real proxy does with a name that does not
+        // resolve, and answering would be the tell.
+        assert_eq!(r.route("http://fury.invalid/", ""), None);
+        assert_eq!(r.route("http://fury.invalid/save", ""), None);
+        assert_eq!(r.route(&format!("http://fury.invalid/{}x/", &t[..31]), ""), None);
+        // Other hosts, never.
+        assert_eq!(r.route("http://example.com/", ""), None);
+        assert_eq!(r.route("http://notfury.invalid/", ""), None);
+        // Loopback only once there is a port, and only on that port.
+        assert_eq!(r.route(&format!("http://127.0.0.1:4444/{t}/probe/"), ""), None);
+        let _ = r.port.set(4444);
+        assert_eq!(r.route(&format!("http://127.0.0.1:4444/{t}/probe/"), ""), Some(Route::Probe));
+        assert_eq!(r.route(&format!("http://127.0.0.1:4445/{t}/probe/"), ""), None);
     }
 
     #[test]
     fn the_start_page_escapes_what_it_prints() {
         // The exit label comes from a proxy hostname the operator typed. It is
         // shown, so it must not be able to close the tag it sits in.
-        let page = start_page("<script>alert(1)</script>");
+        let page = start_page("<script>alert(1)</script>", None);
         assert!(!page.contains("<script>alert(1)"), "exit label was not escaped");
     }
 
