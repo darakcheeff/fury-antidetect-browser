@@ -10,6 +10,7 @@ import { BulkProfiles } from "./components/BulkProfiles";
 import { Cookies } from "./components/Cookies";
 import { Extensions } from "./components/Extensions";
 import { NetworkReport } from "./components/NetworkReport";
+import { ExtensionsView } from "./components/ExtensionsView";
 import { useAsk } from "./components/Ask";
 import { CommandPalette, type Command } from "./components/CommandPalette";
 import { ProfileTable, isOpenHere } from "./components/ProfileTable";
@@ -606,6 +607,8 @@ export function App() {
               ? t("trash.title")
               : view === "proxies"
                 ? t("nav.proxies")
+                : view === "extensions"
+                ? t("nav.extensions")
                 : view === "users"
                   ? t("nav.users")
                   : view === "sharedWithMe"
@@ -975,6 +978,7 @@ export function App() {
             and saying the latter to someone who has been granted nothing sends
             them looking for a profile list that was never theirs. */}
         {view === "proxies" && <Proxies profiles={profiles} />}
+        {view === "extensions" && <ExtensionsView profiles={profiles} />}
 
         {view === "users" && (
           <Users

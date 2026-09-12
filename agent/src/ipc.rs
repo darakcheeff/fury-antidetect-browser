@@ -554,6 +554,76 @@ impl Agent {
                 ))?)
             }
 
+            // Every extension in every profile on this machine, grouped by
+            // extension id: the Extensions section asks "where is uBlock
+            // installed", not "what does profile X have". Read from disk per
+            // profile, like `extensions.list`, for the same reason it does.
+            "extensions.list_all" => {
+                let profiles = self.store.profiles(None).await?;
+                let mut by_id: std::collections::BTreeMap<String, serde_json::Value> = Default::default();
+                for p in &profiles {
+                    for x in crate::ext::installed(&paths::extensions_dir(&p.id)) {
+                        let entry = by_id.entry(x.id.clone()).or_insert_with(|| {
+                            json!({ "id": x.id, "name": x.name, "version": x.version, "profiles": [] })
+                        });
+                        // The newest version wins the label; the row shows one
+                        // name for one id.
+                        if entry["version"].as_str().map(|v| v < x.version.as_str()).unwrap_or(true) {
+                            entry["version"] = json!(x.version);
+                            entry["name"] = json!(x.name);
+                        }
+                        entry["profiles"]
+                            .as_array_mut()
+                            .unwrap()
+                            .push(json!({ "id": p.id, "name": p.name, "version": x.version }));
+                    }
+                }
+                Ok(json!(by_id.into_values().collect::<Vec<_>>()))
+            }
+
+            // One .crx into many profiles. Each install is independent — a
+            // profile that is open is skipped and named rather than failing the
+            // batch, since the file on disk would change under a running
+            // browser.
+            "extensions.install_many" => {
+                let ids: Vec<String> = params
+                    .get("profile_ids")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                    .unwrap_or_default();
+                let b64 = str_param(&params, "crx_b64")?;
+                let bytes = {
+                    use base64::Engine;
+                    base64::engine::general_purpose::STANDARD
+                        .decode(&b64)
+                        .map_err(|e| anyhow::anyhow!("crx_b64 is not base64: {e}"))?
+                };
+                let parsed = crate::ext::parse(&bytes)?;
+                let running = self.running.lock().await;
+                let mut installed = Vec::new();
+                let mut skipped = Vec::new();
+                let mut about: Option<crate::ext::Installed> = None;
+                for id in ids {
+                    if running.contains_key(&id) {
+                        skipped.push(json!({ "id": id, "reason": "open" }));
+                        continue;
+                    }
+                    let dir = paths::extensions_dir(&id).join(&parsed.id);
+                    match crate::ext::install(&bytes, &dir) {
+                        Ok(x) => {
+                            about.get_or_insert(x);
+                            installed.push(id);
+                        }
+                        Err(e) => skipped.push(json!({ "id": id, "reason": e.to_string() })),
+                    }
+                }
+                Ok(json!({
+                    "extension": about.map(|x| json!({ "id": x.id, "name": x.name, "version": x.version })),
+                    "installed": installed,
+                    "skipped": skipped,
+                }))
+            }
+
             "extensions.remove" => {
                 let profile = str_param(&params, "profile_id")?;
                 let ext = str_param(&params, "id")?;

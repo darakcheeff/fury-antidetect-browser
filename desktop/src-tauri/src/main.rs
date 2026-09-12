@@ -141,6 +141,8 @@ fn main() {
             commands::extensions,
             commands::install_extension,
             commands::remove_extension,
+            commands::all_extensions,
+            commands::install_extension_many,
             commands::profile_usage,
             commands::trim_profile,
             commands::reseed_profile,

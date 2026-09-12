@@ -2660,6 +2660,20 @@ pub async fn install_extension(profile_id: String, crx_b64: String) -> R<serde_j
 }
 
 #[tauri::command]
+pub async fn all_extensions() -> R<serde_json::Value> {
+    Ok(crate::agent::call("extensions.list_all", serde_json::json!({})).await?)
+}
+
+#[tauri::command]
+pub async fn install_extension_many(profile_ids: Vec<String>, crx_b64: String) -> R<serde_json::Value> {
+    Ok(crate::agent::call(
+        "extensions.install_many",
+        serde_json::json!({ "profile_ids": profile_ids, "crx_b64": crx_b64 }),
+    )
+    .await?)
+}
+
+#[tauri::command]
 pub async fn remove_extension(profile_id: String, id: String) -> R<serde_json::Value> {
     Ok(crate::agent::call(
         "extensions.remove",

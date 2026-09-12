@@ -150,6 +150,13 @@ export interface Extension {
   path: string;
 }
 
+export interface ExtensionEverywhere {
+  id: string;
+  name: string;
+  version: string;
+  profiles: { id: string; name: string; version: string }[];
+}
+
 export interface Usage {
   total: number;
   cache: number;
@@ -769,6 +776,12 @@ export const api = {
    *  we have. Installing the same extension twice replaces it. */
   installExtension: (profileId: string, crxB64: string): Promise<Extension> =>
     cmd<Extension>("install_extension", { profileId, crxB64 }),
+  /** Every extension on this machine, grouped by id, with the profiles it is in. */
+  allExtensions: (): Promise<ExtensionEverywhere[]> => cmd<ExtensionEverywhere[]>("all_extensions"),
+  /** One .crx into many profiles. Open profiles are skipped and named. */
+  installExtensionMany: (profileIds: string[], crxB64: string): Promise<{
+    extension: Extension | null; installed: string[]; skipped: { id: string; reason: string }[];
+  }> => cmd("install_extension_many", { profileIds, crxB64 }),
   removeExtension: (profileId: string, id: string): Promise<unknown> =>
     cmd("remove_extension", { profileId, id }),
 
