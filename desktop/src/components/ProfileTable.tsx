@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright 2026 Bogdan Shapovalov and the Fury authors
 
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n";
 import { Icon, IconButton } from "./Icon";
 import type { Me, Profile } from "../api";
@@ -98,12 +99,59 @@ export function ProfileTable({
   // answers is "is this on the server", and that question exists as soon as
   // there is a server.
   const hasServer = !local;
+
+  // Windowing (docs/16 5.8). Measured before it was written: a full render
+  // of 2 000 rows cost ~120 ms and 4 MB of DOM, and the list re-renders on
+  // every 5-second poll. Below WINDOW_FROM rows nothing changes — a short
+  // list is rendered whole, so it cannot jitter. Above it, only the rows in
+  // view plus a buffer are rendered, with two spacer rows holding the scroll
+  // height. Row height is an estimate corrected from what is on screen;
+  // rows differ by a tags line or a stage pill, so the estimate is an
+  // average, and the buffer absorbs the difference.
+  const tableRef = useRef<HTMLTableElement>(null);
+  const [rowHeight, setRowHeight] = useState(58);
+  const [range, setRange] = useState({ start: 0, end: WINDOW_FROM });
+  const windowed = profiles.length > WINDOW_FROM;
+  useEffect(() => {
+    if (!windowed) return;
+    const scroller = tableRef.current?.parentElement;
+    if (!scroller) return;
+    const update = () => {
+      const top = scroller.scrollTop;
+      const view = scroller.clientHeight || 600;
+      const start = Math.max(0, Math.floor(top / rowHeight) - BUFFER);
+      const end = Math.min(profiles.length, Math.ceil((top + view) / rowHeight) + BUFFER);
+      setRange((r) => (r.start === start && r.end === end ? r : { start, end }));
+    };
+    update();
+    scroller.addEventListener("scroll", update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(scroller);
+    return () => {
+      scroller.removeEventListener("scroll", update);
+      ro.disconnect();
+    };
+  }, [windowed, rowHeight, profiles.length]);
+  useLayoutEffect(() => {
+    if (!windowed) return;
+    // Correct the estimate from the rows actually on screen.
+    const rows = tableRef.current?.querySelectorAll<HTMLTableRowElement>("tbody tr[data-row]");
+    if (!rows || rows.length === 0) return;
+    let sum = 0;
+    rows.forEach((r) => (sum += r.getBoundingClientRect().height));
+    const avg = sum / rows.length;
+    if (avg > 20 && Math.abs(avg - rowHeight) > 2) setRowHeight(avg);
+  });
+
   if (profiles.length === 0) {
     return <p className="empty pad">{t("row.emptyProject")}</p>;
   }
 
+  const visible = windowed ? profiles.slice(range.start, range.end) : profiles;
+  const columns = 6 + (showProject ? 1 : 0);
+
   return (
-    <table className="grid">
+    <table className="grid" ref={tableRef}>
       <thead>
         <tr>
           <th className="checkCol">
@@ -130,7 +178,12 @@ export function ProfileTable({
         </tr>
       </thead>
       <tbody>
-        {profiles.map((p) => {
+        {windowed && range.start > 0 && (
+          <tr aria-hidden="true" style={{ height: range.start * rowHeight }}>
+            <td colSpan={columns} style={{ padding: 0, border: 0 }} />
+          </tr>
+        )}
+        {visible.map((p) => {
           const canLaunch = p.permissions.includes("launch");
           const canForce = p.permissions.includes("manage_access");
           const canReveal = p.permissions.includes("reveal_secrets");
@@ -146,7 +199,7 @@ export function ProfileTable({
           const verdictText = verdict.notes.map((n) => t(n.key, n.vars)).join(" · ");
 
           return (
-            <tr key={p.id} className={selected.has(p.id) ? "picked" : undefined}>
+            <tr key={p.id} data-row className={selected.has(p.id) ? "picked" : undefined}>
               <td className="checkCol">
                 <input
                   type="checkbox"
@@ -337,7 +390,18 @@ export function ProfileTable({
             </tr>
           );
         })}
+        {windowed && range.end < profiles.length && (
+          <tr aria-hidden="true" style={{ height: (profiles.length - range.end) * rowHeight }}>
+            <td colSpan={columns} style={{ padding: 0, border: 0 }} />
+          </tr>
+        )}
       </tbody>
     </table>
   );
 }
+
+/** Lists longer than this are windowed; shorter ones are rendered whole. */
+const WINDOW_FROM = 150;
+/** Rows rendered beyond each edge of the viewport, so a wheel tick never
+ *  reaches a blank row before the next range is set. */
+const BUFFER = 12;
