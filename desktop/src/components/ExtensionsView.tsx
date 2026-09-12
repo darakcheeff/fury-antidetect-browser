@@ -213,7 +213,19 @@ export function ExtensionsView({ profiles }: { profiles: Profile[] }) {
                   <td style={{ minWidth: 180 }}>
                     <div className="name">{c.name}</div>
                     <div className="muted small">
-                      <a href={c.homepage} target="_blank" rel="noreferrer">{c.homepage.replace(/^https:\/\//, "")}</a> · {c.licence}
+                      {/* A Tauri window has no tab to open; the click goes to the system browser. */}
+                      <a
+                        href={c.homepage}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          void api.openUrl(c.homepage);
+                        }}
+                      >
+                        {c.homepage.replace(/^https:\/\//, "")}
+                      </a>{" "}
+                      · {c.licence}
                     </div>
                   </td>
                   <td className="muted" style={{ maxWidth: 420 }}>{language === "ru" ? c.summary.ru : c.summary.en}</td>

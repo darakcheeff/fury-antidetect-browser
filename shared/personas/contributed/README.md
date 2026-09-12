@@ -1,8 +1,16 @@
 # Contributed personas
 
-One real machine per file, captured with **Settings → Add this machine to the
-catalogue** in the Fury desktop (or `tools/detect-suite/capture-chrome.sh` +
-`fury-detect persona`). The file name is the persona's id.
+One real machine per file. The file name is the persona's id.
+
+The short way in needs no install: open
+**https://furyteamtop.github.io/fury-antidetect-browser/** in ordinary Chrome,
+press «Снять отпечаток» → «Скачать JSON», drop the file into
+[the issue form](https://github.com/furyteamtop/fury-antidetect-browser/issues/new?template=persona.yml).
+A workflow converts it, checks it and opens the pull request under your handle
+(`contributed_by`), with what you said the machine was (`machine`). The other
+ways — **Settings → Add this machine to the catalogue** in the desktop, or
+`tools/detect-suite/capture-chrome.sh` + `fury-detect persona` — end in the same
+form or in a pull request of your own.
 
 Before opening a pull request, run what CI runs:
 

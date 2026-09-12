@@ -33,6 +33,13 @@ pub struct Persona {
     /// physical machine.
     #[serde(default)]
     pub source: Option<String>,
+    /// Who sent the machine, as a GitHub handle, and what they said it was.
+    /// Written by the issue workflow (.github/workflows/persona-issue.yml);
+    /// the two built-in personas have neither.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contributed_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
     pub os: PersonaOs,
     pub gpu: PersonaGpu,
     pub screen: PersonaScreen,

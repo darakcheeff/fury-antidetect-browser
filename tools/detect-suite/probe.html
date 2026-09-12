@@ -79,6 +79,23 @@
 
   if (location.protocol === 'file:') $('fileWarn').hidden = false;
 
+  /* Hosted (GitHub Pages) rather than served by collector.py: there is no
+   * /save to post to, and the person is here to contribute a machine. Hide
+   * the collector controls and point at the issue form instead. */
+  const hosted = location.protocol === 'https:' && !/^(localhost|127\.|\[::1\])/.test(location.hostname);
+  if (hosted) {
+    $('post').hidden = true;
+    $('name').hidden = true;
+    $('fileWarn').hidden = true;
+    const c = document.createElement('div');
+    c.className = 'sub';
+    c.style.marginTop = '-12px';
+    c.innerHTML = 'Снял → «Скачать JSON» → перетащи файл в '
+      + '<a href="https://github.com/furyteamtop/fury-antidetect-browser/issues/new?template=persona.yml" target="_blank" rel="noopener" style="color:#60a5fa">форму</a>. '
+      + 'Страница ничего не отправляет сама.';
+    $('posted').after(c);
+  }
+
   /* The checks that decide whether a build ships. Each returns
    * {verdict, value, why} where verdict is pass | fail | warn | skip.
    * These mirror the release gate in docs/07-detection-baseline.md. */

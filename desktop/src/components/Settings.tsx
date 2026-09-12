@@ -20,6 +20,10 @@ type Tab = (typeof TABS)[number];
  *  resistance becomes the place decisions go to be avoided — each of these
  *  exists because leaving it out would force a choice on someone it does not
  *  fit. */
+/** The issue form that turns a saved capture into a pull request
+ *  (.github/workflows/persona-issue.yml). Drop the file in; a robot does the rest. */
+const PERSONA_FORM = "https://github.com/furyteamtop/fury-antidetect-browser/issues/new?template=persona.yml";
+
 export function Settings({
   shell,
   hasProject,
@@ -710,7 +714,18 @@ function CaptureMachine() {
           </div>
           {saved && (
             <p className="hint">
-              {t("cap.saved", { path: saved })} {t("cap.next")}
+              {t("cap.saved", { path: saved })} {t("cap.next")}{" "}
+              <a
+                href={PERSONA_FORM}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(e) => {
+                  e.preventDefault();
+                  void api.openUrl(PERSONA_FORM);
+                }}
+              >
+                {t("cap.openForm")}
+              </a>
             </p>
           )}
         </div>

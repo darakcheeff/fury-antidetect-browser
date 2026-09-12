@@ -1,0 +1,63 @@
+name: A machine for the catalogue
+description: Add your computer, so somebody has a crowd to hide in. 30 seconds, no install.
+title: "persona: <machine>"
+labels: [persona]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Open **https://furyteamtop.github.io/fury-antidetect-browser/** in ordinary Google Chrome
+        (not Fury), press «Снять отпечаток» then «Скачать JSON», and drop the file into the
+        field below. A workflow turns it into a persona, checks it and opens a pull request
+        under your handle; you will see the link here.
+  - type: input
+    id: machine
+    attributes:
+      label: What machine is this?
+      description: Model, OS version — and whether the display is the built-in one or external.
+      placeholder: "Lenovo Legion 5, Windows 11 24H2, RTX 4060, built-in 1920×1080 display"
+    validations:
+      required: true
+  - type: dropdown
+    id: display
+    attributes:
+      label: Display
+      options:
+        - built-in (laptop / iMac)
+        - external monitor
+        - desktop PC with its usual monitor
+    validations:
+      required: true
+  - type: input
+    id: shaping
+    attributes:
+      label: Anything that shapes the browser?
+      description: Display scaling other than the default, accessibility settings, a font manager. Leave empty if nothing.
+  - type: dropdown
+    id: common
+    attributes:
+      label: Roughly how common is this machine?
+      description: A guess is fine. Rare machines are offered less often on purpose — a persona nobody else owns is conspicuous by itself.
+      options:
+        - common (a popular laptop or a mainstream GPU)
+        - ordinary
+        - unusual (a rare GPU, an odd resolution, a workstation)
+    validations:
+      required: true
+  - type: textarea
+    id: capture
+    attributes:
+      label: The JSON from the probe
+      description: Drag the downloaded file here — GitHub attaches it. Pasting the whole text works too.
+      placeholder: "drop fingerprint-….json here"
+    validations:
+      required: true
+  - type: checkboxes
+    id: consent
+    attributes:
+      label: Two things the workflow cannot check
+      options:
+        - label: This is my computer (or one I am allowed to publish), captured in ordinary Chrome, and no live accounts run on it.
+          required: true
+        - label: I understand the file is that machine's fingerprint and I publish it under the repository's licence.
+          required: true
