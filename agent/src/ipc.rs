@@ -90,6 +90,8 @@ pub struct Agent {
     /// is minutes, and a call that blocks for minutes is a shell that looks
     /// hung. See core_download.rs.
     core_download: crate::core_download::Shared,
+    /// The synchronised-windows group, empty when none is running. See mirror.rs.
+    mirror: Arc<crate::mirror::Hub>,
 }
 
 /// What the exit checker can tell us about where a proxy comes out.
@@ -193,6 +195,7 @@ impl Agent {
             running: Mutex::new(HashMap::new()),
             core: crate::core_binary(),
             core_download: Default::default(),
+            mirror: crate::mirror::Hub::new(),
         }))
     }
 
@@ -1026,6 +1029,71 @@ impl Agent {
             // one thing worse than either.
             // This machine as a persona. Launches the installed Chrome at the
             // probe, converts, validates, returns — sends nothing. See capture.rs.
+            // Synchronised windows. See mirror.rs for the design; here only the
+            // plumbing: which running browsers join, and how the ones that are
+            // not running get started with the debugging port the mirror needs.
+            "mirror.start" => {
+                let ids: Vec<String> = params
+                    .get("profile_ids")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                    .unwrap_or_default();
+                if ids.len() < 2 {
+                    anyhow::bail!("a synchronised group needs at least two profiles");
+                }
+                if let Some(t) = params.get("typing").and_then(|v| v.as_bool()) {
+                    self.mirror.typing.store(t, std::sync::atomic::Ordering::Relaxed);
+                }
+                let mut joined = Vec::new();
+                let mut refused = Vec::new();
+                for id in ids {
+                    // Open without the port: the mirror cannot reach it, and
+                    // relaunching a browser somebody is working in is not
+                    // ours to do. Say so and let them close it.
+                    let open_without_cdp = {
+                        let running = self.running.lock().await;
+                        running.get(&id).map(|r| r.ws_endpoint.is_none()).unwrap_or(false)
+                    };
+                    if open_without_cdp {
+                        refused.push(json!({ "id": id, "reason": "open_without_cdp" }));
+                        continue;
+                    }
+                    let is_running = self.running.lock().await.contains_key(&id);
+                    if !is_running {
+                        if let Err(e) = self.launch(&id, None, None, None, None, true).await {
+                            refused.push(json!({ "id": id, "reason": e.to_string() }));
+                            continue;
+                        }
+                    }
+                    let (ws, name) = {
+                        let running = self.running.lock().await;
+                        let ws = running.get(&id).and_then(|r| r.ws_endpoint.clone());
+                        (ws, self.store.profiles(None).await?.into_iter().find(|p| p.id == id).map(|p| p.name).unwrap_or_else(|| id.clone()))
+                    };
+                    match ws {
+                        Some(ws) => match self.mirror.join(&id, &name, &ws).await {
+                            Ok(()) => joined.push(id),
+                            Err(e) => refused.push(json!({ "id": id, "reason": e.to_string() })),
+                        },
+                        None => refused.push(json!({ "id": id, "reason": "no debugging port after launch" })),
+                    }
+                }
+                Ok(json!({ "joined": joined, "refused": refused, "status": self.mirror.status().await }))
+            }
+
+            "mirror.stop" => {
+                self.mirror.stop().await;
+                Ok(json!({ "stopped": true }))
+            }
+
+            "mirror.status" => Ok(serde_json::to_value(self.mirror.status().await)?),
+
+            "mirror.typing" => {
+                let on = params.get("on").and_then(|v| v.as_bool()).unwrap_or(true);
+                self.mirror.typing.store(on, std::sync::atomic::Ordering::Relaxed);
+                Ok(json!({ "typing": on }))
+            }
+
             "persona.capture" => {
                 let captured = crate::capture::run().await.map_err(anyhow::Error::msg)?;
                 Ok(serde_json::to_value(captured)?)
@@ -2023,6 +2091,10 @@ impl Agent {
     }
 
     async fn stop(&self, profile_id: &str) -> anyhow::Result<serde_json::Value> {
+        // A browser that closes leaves the synchronised group; its socket is
+        // about to die anyway, and a member with no browser is a target that
+        // swallows every mirrored action.
+        self.mirror.leave(profile_id).await;
         // Taken out of the map before the upload, which can take a while: the
         // list must stop reporting it as open the moment the browser is gone.
         let mut entry = {

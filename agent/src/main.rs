@@ -22,6 +22,7 @@ mod import_browser;
 mod install_core;
 mod ipc;
 mod launcher;
+mod mirror;
 mod paths;
 mod personas;
 mod relay;

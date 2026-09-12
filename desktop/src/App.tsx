@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "./i18n";
-import { api, ApiError, type Me, type Profile, type Project, type Shell } from "./api";
+import { api, ApiError, type Me, type MirrorStatus, type Profile, type Project, type Shell } from "./api";
 import { Login } from "./components/Login";
 import { ProfileDialog } from "./components/ProfileDialog";
 import { BulkProfiles } from "./components/BulkProfiles";
@@ -58,6 +58,28 @@ export function App() {
   const [cookiesFor, setCookiesFor] = useState<Profile | null>(null);
   const [extFor, setExtFor] = useState<Profile | null>(null);
   const [netFor, setNetFor] = useState<Profile | null>(null);
+  // The synchronised group, polled while it runs so the banner's counter and
+  // membership stay true to the agent rather than to the click that started it.
+  const [mirror, setMirror] = useState<MirrorStatus | null>(null);
+  const [mirrorNote, setMirrorNote] = useState<string | null>(null);
+  useEffect(() => {
+    if (!shell?.agent_ready) return;
+    let stop = false;
+    const tick = async () => {
+      try {
+        const s = await api.mirrorStatus();
+        if (!stop) setMirror(s.active ? s : null);
+      } catch {
+        if (!stop) setMirror(null);
+      }
+    };
+    void tick();
+    const h = setInterval(() => void tick(), 2000);
+    return () => {
+      stop = true;
+      clearInterval(h);
+    };
+  }, [shell?.agent_ready]);
   const [view, setView] = useState<View>("profiles");
   const [openOnly, setOpenOnly] = useState(false);
   /** A line of information at the top of the window, and — when it is about a
@@ -629,6 +651,43 @@ export function App() {
           </div>
         )}
 
+        {(mirror || mirrorNote) && (
+          <div className="notice" role="status" style={{ display: "block" }}>
+            {mirror && (
+              <div className="row" style={{ flexWrap: "wrap" }}>
+                <strong>{t("mir.active", { n: mirror.members.length })}</strong>
+                <span className="muted small">{mirror.members.map((m) => m.name).join(" · ")}</span>
+                <span className="muted small">· {t("mir.mirrored", { n: mirror.mirrored })}</span>
+                <div className="spacer" />
+                <label className="row" style={{ gap: 6 }}>
+                  <input
+                    type="checkbox"
+                    style={{ width: 14, height: 14, accentColor: "var(--accent)" }}
+                    checked={mirror.typing}
+                    onChange={async (e) => {
+                      await api.mirrorTyping(e.target.checked);
+                      setMirror({ ...mirror, typing: e.target.checked });
+                    }}
+                  />
+                  <span>{t("mir.typing")}</span>
+                </label>
+                <button
+                  className="ghost"
+                  onClick={async () => {
+                    await api.mirrorStop();
+                    setMirror(null);
+                    setMirrorNote(null);
+                  }}
+                >
+                  {t("mir.stop")}
+                </button>
+              </div>
+            )}
+            {mirror && <div className="hint" style={{ marginTop: "var(--s-1)" }}>{t("mir.cost")}</div>}
+            {mirrorNote && <div className="hint" style={{ marginTop: "var(--s-1)" }}>{mirrorNote}</div>}
+          </div>
+        )}
+
         {/* Shown before anything is attempted, not after Launch fails. The
             application is one download and the browser is another, and somebody
             who took only the first has an app that looks entirely finished
@@ -955,6 +1014,35 @@ export function App() {
                 {/* One profile, not many. Copying acts on a single source and
                     cookies belong to a single jar, so offering either for a
                     multi-selection would mean guessing which one was meant. */}
+                {chosen.length >= 2 && local && (
+                  <button
+                    className="primary"
+                    disabled={busy}
+                    title={t("mir.hint")}
+                    onClick={async () => {
+                      setMirrorNote(null);
+                      try {
+                        const r = await api.mirrorStart(chosen.map((p) => p.id), mirror?.typing ?? true);
+                        setMirror(r.status.active ? r.status : null);
+                        if (r.refused.length > 0) {
+                          setMirrorNote(
+                            r.refused
+                              .map((x) => {
+                                const name = profiles.find((p) => p.id === x.id)?.name ?? x.id;
+                                return x.reason === "open_without_cdp" ? t("mir.refusedOpen", { name }) : `${name}: ${x.reason}`;
+                              })
+                              .join(" "),
+                          );
+                        }
+                        await refreshProfiles();
+                      } catch (e) {
+                        setMirrorNote(say(e));
+                      }
+                    }}
+                  >
+                    {t("mir.start", { n: chosen.length })}
+                  </button>
+                )}
                 {chosen.length === 1 && (
                   <>
                     <IconButton icon="copy" label={t("bp.clone")} onClick={() => setBulk(chosen[0])} />

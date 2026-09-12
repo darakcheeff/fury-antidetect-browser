@@ -2765,6 +2765,28 @@ pub async fn save_persona_file(persona: serde_json::Value) -> R<String> {
     Ok(path.display().to_string())
 }
 
+// ---- synchronised windows -------------------------------------------------
+
+#[tauri::command]
+pub async fn mirror_start(profile_ids: Vec<String>, typing: bool) -> R<serde_json::Value> {
+    Ok(crate::agent::call("mirror.start", serde_json::json!({ "profile_ids": profile_ids, "typing": typing })).await?)
+}
+
+#[tauri::command]
+pub async fn mirror_stop() -> R<serde_json::Value> {
+    Ok(crate::agent::call("mirror.stop", serde_json::json!({})).await?)
+}
+
+#[tauri::command]
+pub async fn mirror_status() -> R<serde_json::Value> {
+    Ok(crate::agent::call("mirror.status", serde_json::json!({})).await?)
+}
+
+#[tauri::command]
+pub async fn mirror_typing(on: bool) -> R<serde_json::Value> {
+    Ok(crate::agent::call("mirror.typing", serde_json::json!({ "on": on })).await?)
+}
+
 /// Write the server kit out to a directory the operator picks.
 ///
 /// The other half of the self-hosting instructions. They said "from a clone of

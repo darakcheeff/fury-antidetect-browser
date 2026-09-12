@@ -133,6 +133,13 @@ export interface DomainList {
   allow_only: boolean;
 }
 
+export interface MirrorStatus {
+  active: boolean;
+  typing: boolean;
+  members: { profile_id: string; name: string; pages: number }[];
+  mirrored: number;
+}
+
 export interface Diagnosis {
   ok: boolean;
   steps: { step: string; ok: boolean; ms: number | null; detail: string; code: string | null }[];
@@ -758,6 +765,17 @@ export const api = {
     cookies: unknown[],
   ): Promise<{ imported: number; session_only: number; skipped: number }> =>
     cmd("import_cookies", { id, cookies }),
+  // ---- synchronised windows ---------------------------------------------
+
+  /** Start mirroring between these profiles. Ones not open are launched with
+   *  the debugging port; ones open without it are refused by id. */
+  mirrorStart: (profileIds: string[], typing: boolean): Promise<{
+    joined: string[]; refused: { id: string; reason: string }[]; status: MirrorStatus;
+  }> => cmd("mirror_start", { profileIds, typing }),
+  mirrorStop: (): Promise<unknown> => cmd("mirror_stop"),
+  mirrorStatus: (): Promise<MirrorStatus> => cmd<MirrorStatus>("mirror_status"),
+  mirrorTyping: (on: boolean): Promise<unknown> => cmd("mirror_typing", { on }),
+
   // ---- this machine as a persona ----------------------------------------
 
   /** Runs the installed Chrome at the probe and converts the dump. ~10 s;
