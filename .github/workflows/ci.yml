@@ -262,6 +262,12 @@ jobs:
       # this recurs on every measurement anybody ever takes. The .gitignore
       # holds until somebody types `git add -f`.
       - run: cargo run -p fury-detect -- redact --check
+      # A contributed persona is a pull request with one JSON file. This is
+      # the whole review the file gets from a machine: it parses, validates,
+      # does not reuse an id, says "capture" and not "measured", and carries no
+      # address. What it cannot check -- that the machine exists -- is what the
+      # PR template asks the contributor.
+      - run: cargo run -p fury-detect -- personas-check
       # The ServiceWorker payload is generated from the Worker's. If they drift,
       # a capture reports a cross-context disagreement that belongs to the
       # harness rather than to the browser — the one false positive the headline

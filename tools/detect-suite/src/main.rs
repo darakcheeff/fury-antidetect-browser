@@ -32,6 +32,7 @@ fn main() -> Result<()> {
         Some("flatten") => cmd_flatten(&args[1..]),
         Some("redact") => cmd_redact(&args[1..]),
         Some("persona") => persona::cmd_persona(&args[1..]),
+        Some("personas-check") => persona::cmd_personas_check(&args[1..]),
         _ => {
             eprintln!(
                 "fury-detect {}\n\
@@ -45,6 +46,10 @@ fn main() -> Result<()> {
                  \n  \
                    fury-detect persona <capture.json> [--id name] [--weight 0.01]\n      \
                      Turn a probe capture into a persona for the catalogue.\n\
+                 \n  \
+                   fury-detect personas-check [shared/personas/contributed]\n      \
+                     What CI runs on a contributed persona: parses, validates,\n      \
+                     unique id, source \"capture\", no network fields.\n\
                  \n  \
                    fury-detect redact --check [dir]\n      \
                      Fail if any baseline still carries a routable address.\n\

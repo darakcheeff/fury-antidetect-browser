@@ -146,6 +146,8 @@ fn main() {
             commands::profile_usage,
             commands::trim_profile,
             commands::reseed_profile,
+            commands::capture_persona,
+            commands::save_persona_file,
             commands::blocklists,
             commands::read_blocklist,
             commands::save_blocklist,

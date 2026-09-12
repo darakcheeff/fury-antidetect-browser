@@ -253,6 +253,8 @@ export function Settings({
 
               <DomainLists />
 
+              <CaptureMachine />
+
               <div className="settingsGroup">
                 <h2>{t("set.thisMachine")}</h2>
                 <dl className="kv">
@@ -615,6 +617,102 @@ function DomainLists() {
           {error && <p className="error">{error}</p>}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** This machine as a persona, for the catalogue.
+ *
+ *  The catalogue has 27 machines and two are measured; the rest are derived
+ *  from those two. The machines that would widen the crowd belong to the
+ *  people who installed the .dmg. This button runs the same capture the
+ *  maintainers run — the installed Chrome at the detect-suite probe, in a
+ *  throwaway profile — converts it, and shows the whole result before offering
+ *  to write a file. It sends nothing: getting the file into the repository is
+ *  a pull request, because README says "no telemetry" and means it.
+ *
+ *  The warning on screen is not boilerplate. A persona IS this machine's
+ *  fingerprint — publishing it publishes how this computer looks to any site.
+ *  For the laptop that runs live accounts that is a bad idea, and the screen
+ *  says so before the button does anything. */
+function CaptureMachine() {
+  const { t, say } = useI18n();
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ persona: Record<string, unknown> & { id: string }; problems: string[]; browser: string } | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <div className="settingsGroup">
+      <h2>{t("cap.title")}</h2>
+      <p className="hint">{t("cap.why")}</p>
+      <div className="verdict bad" style={{ marginBottom: "var(--s-3)" }}>{t("cap.warning")}</div>
+      <p className="hint">{t("cap.what")}</p>
+      <div className="row">
+        <button
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            setError(null);
+            setSaved(null);
+            setResult(null);
+            try {
+              setResult(await api.capturePersona());
+            } catch (e) {
+              setError(say(e));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {busy ? t("cap.running") : t("cap.run")}
+        </button>
+      </div>
+      {error && <p className="error">{error}</p>}
+      {result && (
+        <div style={{ marginTop: "var(--s-3)" }}>
+          <p>
+            <strong>{result.persona.id}</strong>
+            <span className="muted small"> · {result.browser}</span>
+          </p>
+          {result.problems.length === 0 ? (
+            <div className="verdict good">{t("cap.consistent")}</div>
+          ) : (
+            <div className="verdict bad">
+              <div>{t("cap.problems")}</div>
+              {result.problems.map((x) => <div key={x}>{x}</div>)}
+            </div>
+          )}
+          <textarea
+            readOnly
+            rows={12}
+            spellCheck={false}
+            value={JSON.stringify(result.persona, null, 2)}
+            style={{ width: "100%", fontFamily: "var(--mono)", fontSize: 11, marginTop: "var(--s-2)" }}
+          />
+          <p className="hint">{t("cap.inFile")}</p>
+          <div className="row" style={{ marginTop: "var(--s-2)" }}>
+            <button
+              className="primary"
+              disabled={busy}
+              onClick={async () => {
+                try {
+                  setSaved(await api.savePersonaFile(result.persona));
+                } catch (e) {
+                  setError(say(e));
+                }
+              }}
+            >
+              {t("cap.save")}
+            </button>
+          </div>
+          {saved && (
+            <p className="hint">
+              {t("cap.saved", { path: saved })} {t("cap.next")}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

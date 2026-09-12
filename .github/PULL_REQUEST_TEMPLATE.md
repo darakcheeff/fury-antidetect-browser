@@ -47,3 +47,20 @@ So: what did you run, and what did it print?
 - [ ] No measurement was quoted that you did not take. If a number is an
       estimate, the text says so — that rule is why the README says "measured
       rather than estimated" in some places and not in others.
+
+## For a contributed persona
+
+<!--
+Delete this section unless the PR adds a file under shared/personas/contributed/.
+`cargo run -p fury-detect -- personas-check` must pass; CI runs it. Three
+questions it cannot answer:
+-->
+
+- **What machine is this?** Model, OS version, and whether the display is the
+  built-in one or external (a persona captured on an external monitor describes
+  a machine that does not exist when the laptop is on its own).
+- **Anything that shapes the browser?** Display scaling other than the default,
+  accessibility settings, a font manager. Extensions do not matter — the
+  capture runs in a throwaway profile.
+- **You understand this file is that machine's fingerprint** and you are
+  publishing it under the repository's licence.

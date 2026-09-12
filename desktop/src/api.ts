@@ -758,6 +758,15 @@ export const api = {
     cookies: unknown[],
   ): Promise<{ imported: number; session_only: number; skipped: number }> =>
     cmd("import_cookies", { id, cookies }),
+  // ---- this machine as a persona ----------------------------------------
+
+  /** Runs the installed Chrome at the probe and converts the dump. ~10 s;
+   *  a Chrome window opens and closes. Nothing is sent anywhere. */
+  capturePersona: (): Promise<{ persona: Record<string, unknown> & { id: string }; problems: string[]; browser: string }> =>
+    cmd("capture_persona"),
+  /** Writes it to ~/Downloads/fury-persona-<id>.json; returns the path. */
+  savePersonaFile: (persona: unknown): Promise<string> => cmd<string>("save_persona_file", { persona }),
+
   // ---- domain lists ------------------------------------------------------
 
   blocklists: (): Promise<DomainList[]> => cmd<DomainList[]>("blocklists"),

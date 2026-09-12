@@ -1024,6 +1024,13 @@ impl Agent {
             // stops matching, which is the point, and also why this is refused
             // while the browser is open: half a session on each seed is the
             // one thing worse than either.
+            // This machine as a persona. Launches the installed Chrome at the
+            // probe, converts, validates, returns — sends nothing. See capture.rs.
+            "persona.capture" => {
+                let captured = crate::capture::run().await.map_err(anyhow::Error::msg)?;
+                Ok(serde_json::to_value(captured)?)
+            }
+
             "profiles.reseed" => {
                 let id = str_param(&params, "id")?;
                 if self.running.lock().await.contains_key(&id) {

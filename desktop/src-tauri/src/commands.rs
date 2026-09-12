@@ -2734,6 +2734,37 @@ pub async fn reseed_profile(state: State<'_, AppState>, id: String, origin: Opti
     Ok(crate::agent::call("profiles.reseed", serde_json::json!({ "id": id })).await?)
 }
 
+// ---- capturing this machine as a persona ----------------------------------
+
+/// Launches the installed Chrome at the probe, converts the dump, validates.
+/// Nothing leaves the machine — see agent/src/capture.rs and docs/16, 3.4.
+#[tauri::command]
+pub async fn capture_persona() -> R<serde_json::Value> {
+    Ok(crate::agent::call("persona.capture", serde_json::json!({})).await?)
+}
+
+/// Writes a captured persona where the operator can find it: the Downloads
+/// folder, named after the persona's id. The interface has no native save
+/// dialog, and a path field for a file most people will attach to a pull
+/// request is worse than a known place.
+#[tauri::command]
+pub async fn save_persona_file(persona: serde_json::Value) -> R<String> {
+    let id = persona
+        .get("id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty() && s.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_'))
+        .ok_or_else(|| ApiErr::local("the persona has no usable id"))?;
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .ok_or_else(|| ApiErr::local("no home directory"))?;
+    let dir = std::path::Path::new(&home).join("Downloads");
+    std::fs::create_dir_all(&dir).map_err(|e| ApiErr::local(format!("Could not create {}: {e}", dir.display())))?;
+    let path = dir.join(format!("fury-persona-{id}.json"));
+    let text = serde_json::to_string_pretty(&persona).map_err(|e| ApiErr::local(e.to_string()))?;
+    std::fs::write(&path, text).map_err(|e| ApiErr::local(format!("Could not write {}: {e}", path.display())))?;
+    Ok(path.display().to_string())
+}
+
 /// Write the server kit out to a directory the operator picks.
 ///
 /// The other half of the self-hosting instructions. They said "from a clone of

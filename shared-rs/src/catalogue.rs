@@ -461,16 +461,31 @@ pub fn pick_weighted(roll: u64) -> Persona {
     all.into_iter().next_back().expect("the catalogue is never empty")
 }
 
+/// Personas that arrived by pull request, one file each, baked in by build.rs.
+mod contributed {
+    include!(concat!(env!("OUT_DIR"), "/contributed_personas.rs"));
+}
+
 pub fn all() -> Vec<Persona> {
     let mac: Persona = serde_json::from_str(MACOS_BASE).expect("macOS base persona parses");
     let win: Persona = serde_json::from_str(WINDOWS_BASE).expect("Windows base persona parses");
 
-    let mut out = Vec::with_capacity(MACOS.len() + WINDOWS.len());
+    let mut out = Vec::with_capacity(MACOS.len() + WINDOWS.len() + contributed::CONTRIBUTED.len());
     for v in MACOS {
         out.push(expand(&mac, v, Family::MacOs));
     }
     for v in WINDOWS {
         out.push(expand(&win, v, Family::Windows));
+    }
+    // Contributed machines, whole: these are not deltas from a base but a
+    // capture of one real machine each, with `source: "capture"` set by the
+    // converter. A file that fails to parse is skipped here and caught by CI
+    // on the pull request that brought it (tools/ci/check-personas.py).
+    for (name, text) in contributed::CONTRIBUTED {
+        match serde_json::from_str::<Persona>(text) {
+            Ok(p) => out.push(p),
+            Err(e) => eprintln!("contributed persona {name} does not parse and is skipped: {e}"),
+        }
     }
     out
 }

@@ -12,6 +12,7 @@
 
 mod blocklist;
 mod bundle;
+mod capture;
 mod cookies;
 mod diagnose;
 mod core_download;

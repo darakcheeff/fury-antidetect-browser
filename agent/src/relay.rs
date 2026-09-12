@@ -680,9 +680,9 @@ fn is_ours(host: &str, port: Option<u16>) -> bool {
 /// "what does a site see" without a collector, a checkout or a network. The
 /// same files CI captures baselines with: tools/detect-suite is the one place
 /// the probe is written.
-const PROBE_HTML: &str = include_str!("../../tools/detect-suite/probe.html");
-const PROBE_JS: &str = include_str!("../../tools/detect-suite/probe.js");
-const PROBE_SW: &str = include_str!("../../tools/detect-suite/sw-probe.js");
+pub(crate) const PROBE_HTML: &str = include_str!("../../tools/detect-suite/probe.html");
+pub(crate) const PROBE_JS: &str = include_str!("../../tools/detect-suite/probe.js");
+pub(crate) const PROBE_SW: &str = include_str!("../../tools/detect-suite/sw-probe.js");
 
 /// The hostname the start page answers on.
 ///
