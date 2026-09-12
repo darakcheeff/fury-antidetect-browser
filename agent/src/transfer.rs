@@ -339,6 +339,7 @@ mod tests {
             project_name: None,
             name: name.into(),
             notes: String::new(),
+            status: String::new(),
             tags: vec!["de".into()],
             blocklists: Vec::new(),
             inline_lists: Vec::new(),
