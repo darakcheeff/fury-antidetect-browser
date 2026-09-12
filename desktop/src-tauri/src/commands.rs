@@ -2611,6 +2611,22 @@ pub async fn create_project(
 // hundred to redo.
 
 /// Make many profiles from one template.
+/// Saved answers to the batch dialog (docs/16 5.6). Kept by the agent in one
+/// file; the same in both modes, because a template is this machine's habit,
+/// not the organisation's record.
+#[tauri::command]
+pub async fn templates() -> R<serde_json::Value> {
+    Ok(crate::agent::call("templates.list", serde_json::json!({})).await?)
+}
+#[tauri::command]
+pub async fn save_template(template: serde_json::Value) -> R<serde_json::Value> {
+    Ok(crate::agent::call("templates.save", serde_json::json!({ "template": template })).await?)
+}
+#[tauri::command]
+pub async fn delete_template(name: String) -> R<serde_json::Value> {
+    Ok(crate::agent::call("templates.delete", serde_json::json!({ "name": name })).await?)
+}
+
 #[tauri::command]
 pub async fn create_profiles(
     state: State<'_, AppState>,

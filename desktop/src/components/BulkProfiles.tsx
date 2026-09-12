@@ -2,8 +2,9 @@
 // Copyright 2026 Bogdan Shapovalov and the Fury authors
 
 import { useEffect, useState } from "react";
-import { api, type LocalProxy, type Profile } from "../api";
+import { api, type LocalProxy, type Profile, type ProfileTemplate } from "../api";
 import { useI18n } from "../i18n";
+import { SUGGESTED } from "../status";
 
 // `created` is only ever counted. Locally the agent returns ids; on a team
 // server each entry is whatever the create endpoint answered, and pinning that
@@ -48,6 +49,18 @@ export function BulkProfiles({
   );
   const [proxyId, setProxyId] = useState("");
   const [tags, setTags] = useState("");
+  // The rest of what a batch shares (5.6): stage, sites, languages, zone,
+  // a note. Each is optional; empty means the profile's own default.
+  const [status, setStatus] = useState("");
+  const [startUrls, setStartUrls] = useState("");
+  const [languages, setLanguages] = useState("");
+  const [timezone, setTimezone] = useState("");
+  const [notes, setNotes] = useState("");
+  const [more, setMore] = useState(false);
+  // Saved templates: the same answers under a name, kept by the agent.
+  const [templates, setTemplates] = useState<ProfileTemplate[]>([]);
+  const [templateName, setTemplateName] = useState("");
+  const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [made, setMade] = useState<Made | null>(null);
@@ -58,7 +71,33 @@ export function BulkProfiles({
   useEffect(() => {
     if (cloning) return;
     void api.proxies().then(setProxies).catch(() => setProxies([]));
+    void api.templates().then(setTemplates).catch(() => setTemplates([]));
   }, [cloning]);
+
+  const split = (s: string) => s.split(/[,;\n]/).map((x) => x.trim()).filter(Boolean);
+  const current = (name: string): ProfileTemplate => ({
+    name,
+    pattern,
+    proxy_id: proxyId,
+    tags: split(tags),
+    status: status.trim(),
+    start_urls: split(startUrls),
+    languages: split(languages),
+    timezone: timezone.trim(),
+    notes,
+  });
+  const apply = (tp: ProfileTemplate) => {
+    setPattern(tp.pattern || "Profile {n}");
+    setProxyId(tp.proxy_id ?? "");
+    setTags(tp.tags.join(", "));
+    setStatus(tp.status ?? "");
+    setStartUrls(tp.start_urls.join("\n"));
+    setLanguages(tp.languages.join(", "));
+    setTimezone(tp.timezone ?? "");
+    setNotes(tp.notes ?? "");
+    setTemplateName(tp.name);
+    if (tp.status || tp.start_urls.length || tp.languages.length || tp.timezone || tp.notes) setMore(true);
+  };
 
   const n = Number(count);
   const inRange = Number.isInteger(n) && n >= 1 && n <= 500;
@@ -87,6 +126,43 @@ export function BulkProfiles({
         <div className="form" style={{ paddingTop: "var(--s-5)", overflowY: "auto" }}>
           {!made && (
             <>
+              {!cloning && (templates.length > 0 || saving) && (
+                <div className="field">
+                  <label htmlFor="bp-template">{t("bp.template")}</label>
+                  <div>
+                    <div className="row">
+                      <select
+                        id="bp-template"
+                        value={templateName}
+                        onChange={(e) => {
+                          const tp = templates.find((x) => x.name === e.target.value);
+                          if (tp) apply(tp);
+                          else setTemplateName("");
+                        }}
+                      >
+                        <option value="">{t("bp.noTemplate")}</option>
+                        {templates.map((x) => (
+                          <option key={x.name} value={x.name}>{x.name}</option>
+                        ))}
+                      </select>
+                      {templateName && templates.some((x) => x.name === templateName) && (
+                        <button
+                          className="ghost danger"
+                          disabled={busy}
+                          onClick={async () => {
+                            await api.deleteTemplate(templateName).catch(() => {});
+                            setTemplates(await api.templates().catch(() => []));
+                            setTemplateName("");
+                          }}
+                        >
+                          {t("row.delete")}
+                        </button>
+                      )}
+                    </div>
+                    <p className="hint">{t("bp.templateHint")}</p>
+                  </div>
+                </div>
+              )}
               <div className="field">
                 <label htmlFor="bp-count">{t("bp.count")}</label>
                 <div>
@@ -152,6 +228,85 @@ export function BulkProfiles({
                         placeholder="etsy, batch-3"
                         onChange={(e) => setTags(e.target.value)}
                       />
+                    </div>
+                  </div>
+                  {!more ? (
+                    <div className="field">
+                      <div />
+                      <div>
+                        <button className="linky" onClick={() => setMore(true)}>{t("bp.more")}</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="field">
+                        <label htmlFor="bp-status">{t("pd.status")}</label>
+                        <div>
+                          <input id="bp-status" list="bp-status-options" value={status} placeholder={t("pd.statusPlaceholder")} onChange={(e) => setStatus(e.target.value)} />
+                          <datalist id="bp-status-options">
+                            {SUGGESTED.map((x) => <option key={x} value={x}>{t(`status.${x}`)}</option>)}
+                          </datalist>
+                        </div>
+                      </div>
+                      <div className="field">
+                        <label htmlFor="bp-urls">{t("bp.startUrls")}</label>
+                        <div>
+                          <textarea id="bp-urls" rows={2} value={startUrls} spellCheck={false} placeholder={"https://www.facebook.com/"} onChange={(e) => setStartUrls(e.target.value)} />
+                        </div>
+                      </div>
+                      <div className="field">
+                        <label htmlFor="bp-langs">{t("bp.languages")}</label>
+                        <div>
+                          <input id="bp-langs" value={languages} spellCheck={false} placeholder="de-DE, de, en" onChange={(e) => setLanguages(e.target.value)} />
+                          <p className="hint">{t("bp.followExit")}</p>
+                        </div>
+                      </div>
+                      <div className="field">
+                        <label htmlFor="bp-tz">{t("bp.timezone")}</label>
+                        <div>
+                          <input id="bp-tz" value={timezone} spellCheck={false} placeholder="Europe/Berlin" onChange={(e) => setTimezone(e.target.value)} />
+                        </div>
+                      </div>
+                      <div className="field">
+                        <label htmlFor="bp-notes">{t("pd.notes")}</label>
+                        <div>
+                          <textarea id="bp-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+                        </div>
+                      </div>
+                    </>
+                  )}
+                  {/* Save these answers under a name, for next time. */}
+                  <div className="field">
+                    <div />
+                    <div>
+                      {!saving ? (
+                        <button className="linky" onClick={() => setSaving(true)}>{t("bp.saveTemplate")}</button>
+                      ) : (
+                        <div className="row">
+                          <input
+                            value={templateName}
+                            placeholder={t("bp.templateName")}
+                            style={{ width: 220 }}
+                            onChange={(e) => setTemplateName(e.target.value)}
+                          />
+                          <button
+                            className="primary"
+                            disabled={busy || !templateName.trim()}
+                            onClick={async () => {
+                              try {
+                                await api.saveTemplate(current(templateName.trim()));
+                                setTemplates(await api.templates());
+                                setSaving(false);
+                              } catch (e) {
+                                setError(say(e));
+                              }
+                            }}
+                          >
+                            {t("set.listSave")}
+                          </button>
+                          <button className="ghost" onClick={() => setSaving(false)}>{t("ui.cancel")}</button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </>
@@ -220,11 +375,9 @@ export function BulkProfiles({
                           id: "",
                           project_id: projectId,
                           name: "",
-                          notes: "",
-                          tags: tags
-                            .split(",")
-                            .map((x) => x.trim())
-                            .filter(Boolean),
+                          notes,
+                          status: status.trim(),
+                          tags: split(tags),
                           // Empty means "spread them over the catalogue by how
                           // common each machine is" — see the agent.
                           persona_id: "",
@@ -235,9 +388,9 @@ export function BulkProfiles({
                           // Absent means the profile follows its exit, which is
                           // the better default and the one the rest of the app
                           // now uses.
-                          timezone: null,
-                          languages: null,
-                          start_urls: [],
+                          timezone: timezone.trim() || null,
+                          languages: split(languages).length > 0 ? split(languages) : null,
+                          start_urls: split(startUrls),
                           last_opened_at: null,
                         }),
                       );

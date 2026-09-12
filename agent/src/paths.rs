@@ -70,6 +70,13 @@ pub fn blocklists_dir() -> PathBuf {
     data_dir().join("blocklists")
 }
 
+/// Saved profile templates (docs/16 5.6): one JSON file, a few kilobytes. A
+/// template is a named set of answers to the batch dialog — proxy, tags,
+/// stage, sites, languages — not a profile, and not a table.
+pub fn templates_file() -> PathBuf {
+    data_dir().join("templates.json")
+}
+
 /// Where this profile's unpacked extensions sit.
 ///
 /// INSIDE the profile directory, which means the team bundle carries them

@@ -225,6 +225,20 @@ export interface Extension {
   path: string;
 }
 
+/** What the batch dialog remembers under a name. Never a seed, never a
+ *  persona: those are per profile by design. */
+export interface ProfileTemplate {
+  name: string;
+  pattern: string;
+  proxy_id: string;
+  tags: string[];
+  status: string;
+  start_urls: string[];
+  languages: string[];
+  timezone: string;
+  notes: string;
+}
+
 export interface ExtensionEverywhere {
   id: string;
   name: string;
@@ -861,6 +875,10 @@ export const api = {
     template: unknown,
   ): Promise<{ created: unknown[]; failed: { n: number; error: string }[] }> =>
     cmd("create_profiles", { count, namePattern, template }),
+  /** Saved answers to the batch dialog, by name (docs/16 5.6). */
+  templates: (): Promise<ProfileTemplate[]> => cmd("templates"),
+  saveTemplate: (template: ProfileTemplate): Promise<{ saved: string }> => cmd("save_template", { template }),
+  deleteTemplate: (name: string): Promise<unknown> => cmd("delete_template", { name }),
 
   /** Copies the setup, never the identity: same persona and proxy, a fresh
    *  seed, no browser data. */

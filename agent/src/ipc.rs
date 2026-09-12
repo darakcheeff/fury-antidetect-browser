@@ -524,6 +524,37 @@ impl Agent {
                 Ok(json!({ "name": name, "text": text }))
             }
 
+            // Saved templates for the batch dialog (5.6). Stored whole in one
+            // file: the shape is the dialog's, and a table for a dozen named
+            // presets would be a schema for a form.
+            "templates.list" => Ok(read_templates()),
+            "templates.save" => {
+                let mut list = read_templates().as_array().cloned().unwrap_or_default();
+                let tpl = params.get("template").cloned().unwrap_or(serde_json::Value::Null);
+                let name = tpl.get("name").and_then(|v| v.as_str()).map(str::trim).unwrap_or("").to_string();
+                let name = name.as_str();
+                if name.is_empty() {
+                    anyhow::bail!("a template needs a name");
+                }
+                // Same name replaces: "save" on a preset that exists is an edit.
+                list.retain(|t| t.get("name").and_then(|v| v.as_str()).map(str::trim) != Some(name));
+                list.push(tpl);
+                list.sort_by(|a, b| {
+                    a.get("name").and_then(|v| v.as_str()).unwrap_or("")
+                        .to_lowercase()
+                        .cmp(&b.get("name").and_then(|v| v.as_str()).unwrap_or("").to_lowercase())
+                });
+                write_templates(&list)?;
+                Ok(json!({ "saved": name }))
+            }
+            "templates.delete" => {
+                let name = str_param(&params, "name")?;
+                let mut list = read_templates().as_array().cloned().unwrap_or_default();
+                list.retain(|t| t.get("name").and_then(|v| v.as_str()) != Some(name.as_str()));
+                write_templates(&list)?;
+                Ok(json!({ "deleted": true }))
+            }
+
             "blocklists.delete" => {
                 let name = str_param(&params, "name")?;
                 let file = blocklist_path(&name)?;
@@ -2394,6 +2425,24 @@ fn blocklist_path(name: &str) -> anyhow::Result<std::path::PathBuf> {
         anyhow::bail!("a blocklist name may only be letters, digits, - and _");
     }
     Ok(paths::blocklists_dir().join(format!("{name}.txt")))
+}
+
+fn read_templates() -> serde_json::Value {
+    std::fs::read_to_string(paths::templates_file())
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_else(|| serde_json::json!([]))
+}
+
+fn write_templates(list: &[serde_json::Value]) -> anyhow::Result<()> {
+    paths::ensure_data_dir()?;
+    let path = paths::templates_file();
+    // Written beside and renamed over: a crash mid-write leaves the old file,
+    // not half of the new one.
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_vec_pretty(list)?)?;
+    std::fs::rename(&tmp, &path)?;
+    Ok(())
 }
 
 /// Every named list, unioned into one. A name that no longer exists is skipped
