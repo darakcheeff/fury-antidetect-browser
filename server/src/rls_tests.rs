@@ -627,6 +627,60 @@ db_test!(the_policy_is_stored_on_the_organisation_and_reads_back_with_defaults, 
 });
 
 // ---------------------------------------------------------------------------
+// 0012: a fresh code before the actions that cannot be undone
+// ---------------------------------------------------------------------------
+
+db_test!(step_up_is_off_by_default_then_demands_enrolment_then_a_fresh_code, c, {
+    use crate::error::ApiError;
+    use crate::security::require_step_up;
+    bind(&mut c, USER_A).await;
+    let caller = crate::auth::Caller {
+        user_id: uuid::Uuid::parse_str(USER_A).unwrap(),
+        org_id: uuid::Uuid::parse_str(ORG_A).unwrap(),
+        role: fury_shared::rbac::OrgRole::Owner,
+    };
+    let raw = "test-token";
+    let hash = crate::auth::hash_token(raw);
+    sqlx::query("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES ($1, $2::uuid, now() + interval '1 day')")
+        .bind(&hash).bind(USER_A).execute(&mut c).await.expect("session");
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert(axum::http::header::AUTHORIZATION, format!("Bearer {raw}").parse().unwrap());
+
+    // Off: nothing asked, even with no second factor enrolled.
+    require_step_up(&mut c, &caller, &headers).await.expect("off means off");
+
+    sqlx::query("UPDATE organizations SET security = '{\"sensitive_actions_2fa\": true}' WHERE id = $1::uuid")
+        .bind(ORG_A).execute(&mut c).await.unwrap();
+    // On, not enrolled: refused with the reason the shell turns into "enrol first".
+    match require_step_up(&mut c, &caller, &headers).await {
+        Err(ApiError::Refused("totp_enrolment_required")) => {}
+        other => panic!("expected enrolment refusal, got {other:?}"),
+    }
+    sqlx::query("UPDATE users SET totp_secret = '\\x00', totp_enabled_at = now() WHERE id = $1::uuid")
+        .bind(USER_A).execute(&mut c).await.unwrap();
+    // Enrolled, no code presented on this session yet.
+    match require_step_up(&mut c, &caller, &headers).await {
+        Err(ApiError::Refused("step_up_required")) => {}
+        other => panic!("expected step-up refusal, got {other:?}"),
+    }
+    // A code eleven minutes ago is not fresh; one just now is.
+    sqlx::query("UPDATE sessions SET totp_verified_at = now() - interval '11 minutes' WHERE token_hash = $1")
+        .bind(&hash).execute(&mut c).await.unwrap();
+    match require_step_up(&mut c, &caller, &headers).await {
+        Err(ApiError::Refused("step_up_required")) => {}
+        other => panic!("a stale mark passed: {other:?}"),
+    }
+    sqlx::query("UPDATE sessions SET totp_verified_at = now() WHERE token_hash = $1")
+        .bind(&hash).execute(&mut c).await.unwrap();
+    require_step_up(&mut c, &caller, &headers).await.expect("a fresh code opens the door");
+    // The mark belongs to the session, not the user: another token of the
+    // same user is still asked.
+    let mut other = axum::http::HeaderMap::new();
+    other.insert(axum::http::header::AUTHORIZATION, "Bearer another".parse().unwrap());
+    assert!(matches!(require_step_up(&mut c, &caller, &other).await, Err(ApiError::Refused("step_up_required"))));
+});
+
+// ---------------------------------------------------------------------------
 // 0011: the organisation's domain lists ride the grant into the launch spec
 // ---------------------------------------------------------------------------
 

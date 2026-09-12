@@ -59,6 +59,13 @@ pub struct Policy {
     /// locks themselves out of their own server with a typo has nobody to call.
     #[serde(default = "default_true")]
     pub owner_exempt_from_allowlist: bool,
+    /// Ask for a fresh code before the actions that cannot be undone —
+    /// purging a profile, removing a member, changing this policy, ending
+    /// everyone's sessions. A session with no second factor enrolled is
+    /// refused those actions outright while this is on: the owner turning it
+    /// on is shown who has not enrolled.
+    #[serde(default)]
+    pub sensitive_actions_2fa: bool,
 }
 
 fn default_second_factor() -> String {
@@ -70,7 +77,7 @@ fn default_true() -> bool {
 
 impl Default for Policy {
     fn default() -> Self {
-        Self { second_factor: "off".into(), ip_allowlist: Vec::new(), owner_exempt_from_allowlist: true }
+        Self { second_factor: "off".into(), ip_allowlist: Vec::new(), owner_exempt_from_allowlist: true, sensitive_actions_2fa: false }
     }
 }
 
@@ -434,6 +441,68 @@ fn code_matches(secret: &[u8], code: &str) -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// step-up: a fresh code before an action that cannot be undone
+// ---------------------------------------------------------------------------
+
+/// How long a code keeps a session marked as recently verified.
+const STEP_UP_WINDOW_MINUTES: i64 = 10;
+
+/// Refuse unless the organisation does not ask for it, or this session
+/// presented a code within the window. Called at the top of the sensitive
+/// handlers with the request headers, since the session is what carries the
+/// mark and the `Caller` does not know which session it is.
+pub async fn require_step_up(db: &mut sqlx::PgConnection, caller: &crate::auth::Caller, headers: &HeaderMap) -> ApiResult<()> {
+    let policy = policy_of(db, caller.org_id).await?;
+    if !policy.sensitive_actions_2fa {
+        return Ok(());
+    }
+    let enrolled: (bool,) = sqlx::query_as("SELECT totp_enabled_at IS NOT NULL FROM users WHERE id = $1")
+        .bind(caller.user_id)
+        .fetch_one(&mut *db)
+        .await?;
+    if !enrolled.0 {
+        return Err(ApiError::Refused("totp_enrolment_required"));
+    }
+    let Some(hash) = auth::token_hash_from_headers(headers) else {
+        return Err(ApiError::Unauthenticated);
+    };
+    let fresh: Option<(bool,)> = sqlx::query_as(
+        "SELECT coalesce(totp_verified_at > now() - ($2 || ' minutes')::interval, false) FROM sessions WHERE token_hash = $1",
+    )
+    .bind(&hash)
+    .bind(STEP_UP_WINDOW_MINUTES.to_string())
+    .fetch_optional(&mut *db)
+    .await?;
+    match fresh {
+        Some((true,)) => Ok(()),
+        _ => Err(ApiError::Refused("step_up_required")),
+    }
+}
+
+/// `POST /v1/me/totp/verify` — marks this session as recently verified.
+pub async fn totp_verify(mut db: Db, headers: HeaderMap, Json(req): Json<CodeRequest>) -> ApiResult<Json<serde_json::Value>> {
+    let caller = db.caller;
+    let row: Option<(Option<Vec<u8>>,)> = sqlx::query_as("SELECT totp_secret FROM users WHERE id = $1 AND totp_enabled_at IS NOT NULL")
+        .bind(caller.user_id)
+        .fetch_optional(db.as_mut())
+        .await?;
+    let Some((Some(secret),)) = row else {
+        return Err(ApiError::Refused("totp_enrolment_required"));
+    };
+    if !code_matches(&secret, &req.code) {
+        return Err(ApiError::BadRequest("that code does not match".into()));
+    }
+    let Some(hash) = auth::token_hash_from_headers(&headers) else {
+        return Err(ApiError::Unauthenticated);
+    };
+    sqlx::query("UPDATE sessions SET totp_verified_at = now() WHERE token_hash = $1")
+        .bind(&hash)
+        .execute(db.as_mut())
+        .await?;
+    Ok(Json(json!({ "verified": true, "minutes": STEP_UP_WINDOW_MINUTES })))
+}
+
+// ---------------------------------------------------------------------------
 // enrolling the second factor
 // ---------------------------------------------------------------------------
 
@@ -592,6 +661,7 @@ pub async fn put_policy(mut db: Db, headers: HeaderMap, Json(policy): Json<Polic
     if !matches!(caller.role, OrgRole::Owner) {
         return Err(ApiError::Denied(Perm::ManageAccess));
     }
+    require_step_up(db.as_mut(), &caller, &headers).await?;
     policy.validate().map_err(ApiError::BadRequest)?;
     // Refuse a list that would refuse the owner writing it, unless they are
     // exempt: the next request from this address would be their last.
@@ -599,6 +669,17 @@ pub async fn put_policy(mut db: Db, headers: HeaderMap, Json(policy): Json<Polic
         return Err(ApiError::BadRequest(
             "this allowlist does not include the address you are connected from, and owners are not exempt in it".into(),
         ));
+    }
+    // The same courtesy for the code: an owner who turns this on without a
+    // second factor of their own could never turn it off again.
+    if policy.sensitive_actions_2fa {
+        let enrolled: (bool,) = sqlx::query_as("SELECT totp_enabled_at IS NOT NULL FROM users WHERE id = $1")
+            .bind(caller.user_id)
+            .fetch_one(db.as_mut())
+            .await?;
+        if !enrolled.0 {
+            return Err(ApiError::Refused("totp_enrolment_required"));
+        }
     }
     sqlx::query("UPDATE organizations SET security = $2 WHERE id = $1")
         .bind(caller.org_id)
@@ -753,11 +834,12 @@ pub async fn revoke_session(mut db: Db, Path(id): Path<String>) -> ApiResult<Jso
 
 /// `DELETE /v1/org/members/{user_id}/sessions` — every session of one member.
 /// What an owner does the moment a freelancer stops being one.
-pub async fn revoke_member_sessions(mut db: Db, Path(user_id): Path<Uuid>) -> ApiResult<Json<serde_json::Value>> {
+pub async fn revoke_member_sessions(mut db: Db, headers: HeaderMap, Path(user_id): Path<Uuid>) -> ApiResult<Json<serde_json::Value>> {
     let caller = db.caller;
     if !matches!(caller.role, OrgRole::Owner | OrgRole::Admin) {
         return Err(ApiError::Denied(Perm::ManageAccess));
     }
+    require_step_up(db.as_mut(), &caller, &headers).await?;
     let n = sqlx::query(
         "DELETE FROM sessions WHERE user_id = $1 AND user_id IN (SELECT user_id FROM org_members WHERE org_id = $2)",
     )

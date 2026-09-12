@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type Perm, type Project } from "../api";
 import { useI18n } from "../i18n";
+import { withStepUp } from "../stepUp";
 import { Audit } from "./Audit";
 import { Security } from "./Security";
 import { TeamDomainLists } from "./TeamDomainLists";
@@ -274,7 +275,7 @@ export function Users({
                           danger: true,
                         });
                         if (go === null) return;
-                        await run(() => api.removeMember(m.user_id));
+                        await run(() => withStepUp(ask, t, () => api.removeMember(m.user_id)));
                       }}
                     >
                       {t("team.removeShort")}

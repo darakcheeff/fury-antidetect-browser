@@ -143,6 +143,8 @@ export interface SecurityPolicy {
   second_factor: "off" | "new_device" | "always";
   ip_allowlist: string[];
   owner_exempt_from_allowlist: boolean;
+  /** A fresh code before purging, removing a member, changing the policy. */
+  sensitive_actions_2fa: boolean;
 }
 
 export interface LoginEvent {
@@ -578,6 +580,8 @@ export const api = {
     cmd("totp_status"),
   totpSetup: (): Promise<{ uri: string; secret: string }> => cmd("totp_setup"),
   totpConfirm: (code: string): Promise<{ enabled: boolean }> => cmd("totp_confirm", { code }),
+  /** Marks this session as recently verified; see stepUp.ts. */
+  totpVerify: (code: string): Promise<{ verified: boolean; minutes: number }> => cmd("totp_verify", { code }),
   totpDisable: (code: string): Promise<{ enabled: boolean }> => cmd("totp_disable", { code }),
   orgSecurity: (): Promise<{ policy: SecurityPolicy; members: { user_id: string; email: string; totp_enabled_at: string | null }[] }> =>
     cmd("org_security"),

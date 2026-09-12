@@ -40,6 +40,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/v1/me/totp", get(crate::security::totp_status).delete(crate::security::totp_disable))
         .route("/v1/me/totp/setup", post(crate::security::totp_setup))
         .route("/v1/me/totp/confirm", post(crate::security::totp_confirm))
+        .route("/v1/me/totp/verify", post(crate::security::totp_verify))
         .route("/v1/org/security", get(crate::security::get_policy).put(crate::security::put_policy))
         .route("/v1/org/domain-lists", get(list_domain_lists).post(upsert_domain_list))
         .route("/v1/org/domain-lists/{id}", axum::routing::delete(delete_domain_list))
@@ -2569,11 +2570,14 @@ async fn restore_profile(
 /// Gone for good: the row, and every bundle stored for it.
 async fn purge_profile(
     mut db: auth::Db,
+    headers: HeaderMap,
     Path(profile_id): Path<Uuid>,
 ) -> ApiResult<Json<serde_json::Value>> {
     // Copied out so that reading it does not borrow the connection: a
     // handler needs both in the same expression constantly.
     let caller = db.caller;
+    // Cannot be undone, so the organisation may ask for a fresh code first.
+    crate::security::require_step_up(db.as_mut(), &caller, &headers).await?;
 
     let project: Option<(Uuid,)> = sqlx::query_as("SELECT project_id FROM profiles WHERE id = $1")
         .bind(profile_id)
@@ -2900,6 +2904,7 @@ pub struct RotatedProxy {
 /// single member can read all of them.
 async fn rotate_org_key(
     mut db: auth::Db,
+    headers: HeaderMap,
     Json(req): Json<RotateRequest>,
 ) -> ApiResult<Json<serde_json::Value>> {
     // Copied out so that reading it does not borrow the connection: a
@@ -2909,6 +2914,11 @@ async fn rotate_org_key(
     use fury_shared::rbac::OrgRole;
     if !matches!(caller.role, OrgRole::Owner | OrgRole::Admin) {
         return Err(ApiError::Denied(Perm::ManageAccess));
+    }
+    // Removing a member is the action a stolen session would take; a plain
+    // rotation only costs everyone a re-fetch of the key.
+    if req.remove_user_id.is_some() {
+        crate::security::require_step_up(db.as_mut(), &caller, &headers).await?;
     }
     if req.remove_user_id == Some(caller.user_id) {
         return Err(ApiError::BadRequest(

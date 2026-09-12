@@ -239,10 +239,13 @@ impl AppState {
             }
             // A policy refusal names its reason; the interface has a sentence
             // for it. Everything else stays a status the interface describes.
-            let code = if parsed.get("error").and_then(|v| v.as_str()) == Some("refused")
-                && parsed.get("reason").and_then(|v| v.as_str()) == Some("ip_not_allowed")
-            {
-                Some("err.ipNotAllowed")
+            let code = if parsed.get("error").and_then(|v| v.as_str()) == Some("refused") {
+                match parsed.get("reason").and_then(|v| v.as_str()) {
+                    Some("ip_not_allowed") => Some("err.ipNotAllowed"),
+                    Some("step_up_required") => Some("err.stepUpRequired"),
+                    Some("totp_enrolment_required") => Some("err.totpEnrolmentRequired"),
+                    _ => None,
+                }
             } else {
                 None
             };
@@ -689,6 +692,12 @@ pub async fn totp_setup(state: State<'_, AppState>) -> R<serde_json::Value> {
 #[tauri::command]
 pub async fn totp_confirm(state: State<'_, AppState>, code: String) -> R<serde_json::Value> {
     state.call(reqwest::Method::POST, "/v1/me/totp/confirm", Body::Json(serde_json::json!({ "code": code })), true).await
+}
+/// Marks this session as recently verified so that the sensitive actions
+/// the organisation guards (docs/16 5.32) go through for the next ten minutes.
+#[tauri::command]
+pub async fn totp_verify(state: State<'_, AppState>, code: String) -> R<serde_json::Value> {
+    state.call(reqwest::Method::POST, "/v1/me/totp/verify", Body::Json(serde_json::json!({ "code": code })), true).await
 }
 #[tauri::command]
 pub async fn totp_disable(state: State<'_, AppState>, code: String) -> R<serde_json::Value> {

@@ -102,6 +102,7 @@ fn main() {
             commands::totp_status,
             commands::totp_setup,
             commands::totp_confirm,
+            commands::totp_verify,
             commands::totp_disable,
             commands::org_security,
             commands::set_org_security,

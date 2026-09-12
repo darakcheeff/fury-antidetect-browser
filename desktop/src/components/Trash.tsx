@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type Profile } from "../api";
 import { useI18n } from "../i18n";
 import { useAsk } from "./Ask";
+import { withStepUp } from "../stepUp";
 
 /** Deleted profiles, and the two things you can do with one.
  *
@@ -13,7 +14,7 @@ import { useAsk } from "./Ask";
  *  the cost of keeping a row nobody wanted. Emptying is the destructive
  *  operation, so it is the one that names what goes: the browser data too. */
 export function Trash({ onChanged }: { onChanged: () => void }) {
-  const { t } = useI18n();
+  const { t, say } = useI18n();
   const [rows, setRows] = useState<Profile[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -106,10 +107,19 @@ export function Trash({ onChanged }: { onChanged: () => void }) {
                         });
                         if (go === null) return;
                         setBusy(true);
-                        await api.purgeProfile(p.id, p.origin);
-                        await load();
-                        onChanged();
-                        setBusy(false);
+                        setError(null);
+                        try {
+                          // The server may ask for a code first (docs/16 5.32).
+                          const done = await withStepUp(ask, t, () => api.purgeProfile(p.id, p.origin));
+                          if (done !== null) {
+                            await load();
+                            onChanged();
+                          }
+                        } catch (e) {
+                          setError(say(e));
+                        } finally {
+                          setBusy(false);
+                        }
                       }}
                     >
                       {t("trash.purge")}

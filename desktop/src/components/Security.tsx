@@ -4,6 +4,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type LoginEvent, type SecurityPolicy, type SessionRow } from "../api";
 import { useI18n } from "../i18n";
+import { withStepUp } from "../stepUp";
+import { useAsk } from "./Ask";
 
 /** The organisation's sign-in policy, its login journal, and everyone's
  *  sessions. Owners and admins; the policy itself is the owner's to change.
@@ -15,6 +17,7 @@ import { useI18n } from "../i18n";
  *  now — and one list nobody reads until the day they have to. */
 export function Security({ isOwner }: { isOwner: boolean }) {
   const { t, say } = useI18n();
+  const { ask, dialog } = useAsk();
   const [policy, setPolicy] = useState<SecurityPolicy | null>(null);
   const [members, setMembers] = useState<{ user_id: string; email: string; totp_enabled_at: string | null }[]>([]);
   const [allowText, setAllowText] = useState("");
@@ -51,6 +54,7 @@ export function Security({ isOwner }: { isOwner: boolean }) {
 
   return (
     <div>
+      {dialog}
       <h2 className="sectionTitle" style={{ marginTop: "var(--s-6)" }}>{t("sec.policy")}</h2>
       <div className="field">
         <label>{t("sec.secondFactor")}</label>
@@ -97,6 +101,27 @@ export function Security({ isOwner }: { isOwner: boolean }) {
           </label>
         </div>
       </div>
+      <div className="field">
+        <label>{t("sec.sensitive")}</label>
+        <div>
+          <label className="row" style={{ gap: 6 }}>
+            <input
+              type="checkbox"
+              style={{ width: 14, height: 14, accentColor: "var(--accent)" }}
+              checked={policy.sensitive_actions_2fa}
+              disabled={!isOwner}
+              onChange={(e) => setPolicy({ ...policy, sensitive_actions_2fa: e.target.checked })}
+            />
+            <span>{t("sec.sensitive")}</span>
+          </label>
+          <p className="hint">{t("sec.sensitiveHint")}</p>
+          {policy.sensitive_actions_2fa && notEnrolled.length > 0 && (
+            <p className="hint warn">
+              {t("sec.notEnrolled", { n: notEnrolled.length })} {notEnrolled.map((m) => m.email).join(", ")}
+            </p>
+          )}
+        </div>
+      </div>
       {isOwner && (
         <div className="row" style={{ marginBottom: "var(--s-4)" }}>
           <button
@@ -107,10 +132,14 @@ export function Security({ isOwner }: { isOwner: boolean }) {
               setNote(null);
               setError(null);
               try {
-                const r = await api.setOrgSecurity({
-                  ...policy,
-                  ip_allowlist: allowText.split(/\r?\n/).map((s) => s.trim()).filter(Boolean),
-                });
+                // Changing the policy is itself one of the guarded actions.
+                const r = await withStepUp(ask, t, () =>
+                  api.setOrgSecurity({
+                    ...policy,
+                    ip_allowlist: allowText.split(/\r?\n/).map((s) => s.trim()).filter(Boolean),
+                  }),
+                );
+                if (r === null) return;
                 setPolicy(r.policy);
                 setNote(t("sec.saved"));
               } catch (e) {
