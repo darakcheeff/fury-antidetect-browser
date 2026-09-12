@@ -1,0 +1,80 @@
+[
+  {
+    "id": "ddkjiahejlhfcafbddmgiahcphecmpfh",
+    "name": "uBlock Origin Lite",
+    "summary": {
+      "en": "Content blocker. Most real users run one; a profile without any is the anomaly, not the norm.",
+      "ru": "Блокировщик. У большинства настоящих пользователей он есть; профиль без него — аномалия, а не норма."
+    },
+    "category": "blocking",
+    "homepage": "https://github.com/uBlockOrigin/uBOL-home",
+    "licence": "GPL-3.0",
+    "added_by": "fury",
+    "added_on": "2026-09-12"
+  },
+  {
+    "id": "hlkenndednhfkekhgcdicdfddnkalmdm",
+    "name": "Cookie-Editor",
+    "summary": {
+      "en": "View, edit, import and export cookies of the current site from a popup.",
+      "ru": "Смотреть, править, импортировать и экспортировать cookies текущего сайта из окошка."
+    },
+    "category": "cookies",
+    "homepage": "https://cookie-editor.com",
+    "licence": "GPL-3.0",
+    "added_by": "fury",
+    "added_on": "2026-09-12"
+  },
+  {
+    "id": "bhghoamapcdpbohphigoooaddinpkbai",
+    "name": "Authenticator",
+    "summary": {
+      "en": "TOTP codes in the browser, for accounts whose second factor lives with the profile.",
+      "ru": "TOTP-коды в браузере — для аккаунтов, чей второй фактор живёт вместе с профилем."
+    },
+    "category": "auth",
+    "homepage": "https://authenticator.cc",
+    "licence": "MIT",
+    "added_by": "fury",
+    "added_on": "2026-09-12"
+  },
+  {
+    "id": "nngceckbapebfimnlniiiahkandclblb",
+    "name": "Bitwarden Password Manager",
+    "summary": {
+      "en": "Open-source password manager; one vault per profile if the accounts must not meet.",
+      "ru": "Открытый менеджер паролей; по хранилищу на профиль, если аккаунты не должны встречаться."
+    },
+    "category": "auth",
+    "homepage": "https://bitwarden.com",
+    "licence": "GPL-3.0",
+    "added_by": "fury",
+    "added_on": "2026-09-12"
+  },
+  {
+    "id": "eimadpbcbfnmbkopoojfekhnkhdbieeh",
+    "name": "Dark Reader",
+    "summary": {
+      "en": "Dark theme for every site. Ordinary, popular, harmless — the kind of thing a real machine has.",
+      "ru": "Тёмная тема для всех сайтов. Обычное, популярное, безвредное — то, что стоит у настоящих людей."
+    },
+    "category": "appearance",
+    "homepage": "https://darkreader.org",
+    "licence": "MIT",
+    "added_by": "fury",
+    "added_on": "2026-09-12"
+  },
+  {
+    "id": "aapbdbdomjkkjkaonfhkkikfgjllcleb",
+    "name": "Google Translate",
+    "summary": {
+      "en": "Translate the page in place. Common enough that its absence says nothing and its presence says less.",
+      "ru": "Перевод страницы на месте. Настолько обычное, что его отсутствие ничего не говорит, а присутствие — ещё меньше."
+    },
+    "category": "tools",
+    "homepage": "https://translate.google.com",
+    "licence": "proprietary",
+    "added_by": "fury",
+    "added_on": "2026-09-12"
+  }
+]

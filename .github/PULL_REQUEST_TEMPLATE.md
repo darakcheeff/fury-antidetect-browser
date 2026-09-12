@@ -64,3 +64,17 @@ questions it cannot answer:
   capture runs in a throwaway profile.
 - **You understand this file is that machine's fingerprint** and you are
   publishing it under the repository's licence.
+
+## For a catalogue extension
+
+<!--
+Delete this section unless the PR edits shared/extensions/catalogue.json.
+`cargo test -p fury-shared extensions` must pass; CI runs it. Two questions it
+cannot answer:
+-->
+
+- **Does the id resolve?** `https://chromewebstore.google.com/detail/<id>`
+  opens and its title is the `name` in the entry.
+- **Why this one?** Something an account operator installs into every profile
+  by hand, open-source or from a vendor whose name carries the responsibility.
+  Not a wallet, not an anti-captcha — see shared/extensions/README.md.

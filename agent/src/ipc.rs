@@ -637,6 +637,83 @@ impl Agent {
                 }))
             }
 
+            // What the Extensions section offers by one click. The list is
+            // shared/extensions/catalogue.json, baked into fury-shared.
+            "extensions.catalogue" => Ok(serde_json::to_value(fury_shared::extensions::all())?),
+
+            // Install by Web Store id into many profiles. The package is
+            // fetched once per distinct proxy — through that proxy — and the
+            // key inside it must derive the id that was asked for (webstore.rs
+            // says why both). A profile that is open is skipped and named, as
+            // in `install_many`.
+            "extensions.install_from_store" => {
+                let ext_id = str_param(&params, "ext_id")?;
+                if !fury_shared::extensions::is_id(&ext_id) {
+                    anyhow::bail!("{ext_id:?} is not an extension id");
+                }
+                let ids: Vec<String> = params
+                    .get("profile_ids")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                    .unwrap_or_default();
+                let proxies = self.store.proxies().await?;
+                let running = self.running.lock().await;
+                // Route → the package fetched along it, or why it could not be.
+                let mut fetched: std::collections::HashMap<Option<String>, Result<Vec<u8>, String>> = Default::default();
+                let mut installed = Vec::new();
+                let mut skipped = Vec::new();
+                let mut about: Option<crate::ext::Installed> = None;
+                for id in ids {
+                    if running.contains_key(&id) {
+                        skipped.push(json!({ "id": id, "reason": "open" }));
+                        continue;
+                    }
+                    let Some(profile) = self.store.profile(&id).await? else {
+                        skipped.push(json!({ "id": id, "reason": "no such profile" }));
+                        continue;
+                    };
+                    let route = profile
+                        .proxy_id
+                        .as_deref()
+                        .and_then(|pid| proxies.iter().find(|p| p.id == pid))
+                        .map(|p| p.url());
+                    if profile.proxy_id.is_some() && route.is_none() {
+                        skipped.push(json!({ "id": id, "reason": "proxy_missing" }));
+                        continue;
+                    }
+                    if !fetched.contains_key(&route) {
+                        let got = match crate::webstore::fetch(&ext_id, route.as_deref()).await {
+                            Ok(bytes) => match crate::ext::parse(&bytes) {
+                                Ok(parsed) if parsed.id == ext_id => Ok(bytes),
+                                Ok(parsed) => Err(format!("id_mismatch:{}", parsed.id)),
+                                Err(e) => Err(e.to_string()),
+                            },
+                            Err(e) => Err(format!("fetch:{e:#}")),
+                        };
+                        fetched.insert(route.clone(), got);
+                    }
+                    match &fetched[&route] {
+                        Err(reason) => skipped.push(json!({ "id": id, "reason": reason })),
+                        Ok(bytes) => {
+                            let dir = paths::extensions_dir(&id).join(&ext_id);
+                            match crate::ext::install(bytes, &dir) {
+                                Ok(x) => {
+                                    about.get_or_insert(x);
+                                    installed.push(id);
+                                }
+                                Err(e) => skipped.push(json!({ "id": id, "reason": e.to_string() })),
+                            }
+                        }
+                    }
+                }
+                Ok(json!({
+                    "extension": about.map(|x| json!({ "id": x.id, "name": x.name, "version": x.version })),
+                    "installed": installed,
+                    "skipped": skipped,
+                    "routes": fetched.len(),
+                }))
+            }
+
             "extensions.remove" => {
                 let profile = str_param(&params, "profile_id")?;
                 let ext = str_param(&params, "id")?;

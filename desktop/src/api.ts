@@ -230,6 +230,26 @@ export interface ExtensionEverywhere {
   profiles: { id: string; name: string; version: string }[];
 }
 
+/** One row of shared/extensions/catalogue.json. */
+export interface CatalogueEntry {
+  id: string;
+  name: string;
+  summary: { en: string; ru: string };
+  category: string;
+  homepage: string;
+  licence: string;
+  added_by: string;
+  added_on: string;
+}
+
+export interface StoreInstallResult {
+  extension: Extension | null;
+  installed: string[];
+  skipped: { id: string; reason: string }[];
+  /** How many distinct proxies the package was fetched through. */
+  routes: number;
+}
+
 export interface Usage {
   total: number;
   cache: number;
@@ -923,6 +943,10 @@ export const api = {
   }> => cmd("install_extension_many", { profileIds, crxB64 }),
   removeExtension: (profileId: string, id: string): Promise<unknown> =>
     cmd("remove_extension", { profileId, id }),
+  extensionCatalogue: (): Promise<CatalogueEntry[]> => cmd("extension_catalogue"),
+  /** By Web Store id, fetched through each profile's own proxy (docs/12, B). */
+  installExtensionFromStore: (profileIds: string[], extId: string): Promise<StoreInstallResult> =>
+    cmd("install_extension_from_store", { profileIds, extId }),
 
   /** A fresh fingerprint seed. Refused while the profile is open. Everything a
    *  site tied to the old fingerprint stops matching — which is the point, and

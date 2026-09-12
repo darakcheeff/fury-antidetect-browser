@@ -174,11 +174,7 @@ pub fn install(crx: &[u8], dir: &Path) -> Result<Installed> {
     );
     std::fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest)?)?;
 
-    let name = manifest
-        .get("name")
-        .and_then(|v| v.as_str())
-        .unwrap_or("extension")
-        .to_string();
+    let name = display_name(dir, &manifest);
     let version = manifest
         .get("version")
         .and_then(|v| v.as_str())
@@ -186,6 +182,30 @@ pub fn install(crx: &[u8], dir: &Path) -> Result<Installed> {
         .to_string();
 
     Ok(Installed { id: parsed.id, name, version, path: dir.display().to_string() })
+}
+
+/// The manifest's `name`, with an `__MSG_key__` placeholder resolved from
+/// `_locales/<default_locale>/messages.json`. Store extensions are almost all
+/// localised this way, and "__MSG_extName__" in a table is not a name.
+fn display_name(dir: &Path, manifest: &serde_json::Value) -> String {
+    let raw = manifest.get("name").and_then(|v| v.as_str()).unwrap_or("extension");
+    let Some(key) = raw.strip_prefix("__MSG_").and_then(|k| k.strip_suffix("__")) else {
+        return raw.to_string();
+    };
+    let looked_up = manifest
+        .get("default_locale")
+        .and_then(|v| v.as_str())
+        .and_then(|locale| std::fs::read(dir.join("_locales").join(locale).join("messages.json")).ok())
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|messages| {
+            // Keys are case-insensitive in Chromium's lookup.
+            messages.as_object().and_then(|m| {
+                m.iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case(key))
+                    .and_then(|(_, v)| v.get("message").and_then(|s| s.as_str()).map(str::to_string))
+            })
+        });
+    looked_up.unwrap_or_else(|| raw.to_string())
 }
 
 /// Every extension directory installed for a profile, in a stable order.
@@ -213,7 +233,7 @@ pub fn installed(root: &Path) -> Vec<Installed> {
             .unwrap_or_else(|| dir.file_name().unwrap_or_default().to_string_lossy().to_string());
         out.push(Installed {
             id,
-            name: json.get("name").and_then(|v| v.as_str()).unwrap_or("extension").to_string(),
+            name: display_name(&dir, &json),
             version: json.get("version").and_then(|v| v.as_str()).unwrap_or("0").to_string(),
             path: dir.display().to_string(),
         });

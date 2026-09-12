@@ -2,30 +2,41 @@
 // Copyright 2026 Bogdan Shapovalov and the Fury authors
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type ExtensionEverywhere, type Profile } from "../api";
+import { api, type CatalogueEntry, type ExtensionEverywhere, type Profile, type StoreInstallResult } from "../api";
 import { useI18n } from "../i18n";
 
-/** Every extension on this machine, and which profiles carry it.
+/** Every extension on this machine, which profiles carry it, and a catalogue
+ *  to install from.
  *
  *  The per-profile dialog answers "what does this profile have"; this section
  *  answers the question an operator with forty profiles actually asks — "which
  *  of them have the wallet, and which are missing it" — and lets a .crx go into
  *  many at once. Proposed 12.09.2026 after the AdsPower audit (docs/12, 5.30).
  *
- *  No catalogue here yet. What a catalogue should hold, and why installing by
- *  Web Store id is a decision rather than a feature, is written in docs/12
- *  under 5.31; until that decision the file comes from disk. */
+ *  The catalogue (5.31) is shared/extensions/catalogue.json: a short list of
+ *  Web Store ids. Installing one fetches the package through the proxy of each
+ *  profile it goes into and checks the key derives the id (docs/12, decision
+ *  B) — the agent does both; this file only asks. Anything not in the list is
+ *  reachable by pasting its id or store link. */
+
+/** What the target picker is open for. */
+type Pick = { mode: "file" } | { mode: "store"; id: string; name: string };
+
+const ID_IN_TEXT = /[a-p]{32}/;
+
 export function ExtensionsView({ profiles }: { profiles: Profile[] }) {
-  const { t, say } = useI18n();
+  const { t, say, language } = useI18n();
   const [rows, setRows] = useState<ExtensionEverywhere[] | null>(null);
+  const [catalogue, setCatalogue] = useState<CatalogueEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  // Which profiles the next .crx goes into. Starts as every local profile:
+  // Which profiles the next install goes into. Starts as every local profile:
   // "install everywhere" is the common case, unticking is the exception.
   const local = profiles.filter((p) => p.origin === "local");
   const [targets, setTargets] = useState<Set<string>>(() => new Set(local.map((p) => p.id)));
-  const [picking, setPicking] = useState(false);
+  const [picking, setPicking] = useState<Pick | null>(null);
+  const [byId, setById] = useState("");
   const file = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -40,9 +51,34 @@ export function ExtensionsView({ profiles }: { profiles: Profile[] }) {
 
   useEffect(() => {
     void load();
+    api.extensionCatalogue().then(setCatalogue, (e) => setError(say(e)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load]);
 
-  const install = async (f: File) => {
+  /** The agent's reasons are stable names; the sentence is ours. */
+  const reason = (r: string) => {
+    if (r === "proxy_missing") return t("exv.reason.proxy_missing");
+    if (r.startsWith("id_mismatch:")) return t("exv.reason.id_mismatch");
+    if (r.startsWith("fetch:")) return t("exv.reason.fetch", { detail: r.slice(6) });
+    return r;
+  };
+
+  const report = (r: StoreInstallResult | { extension: { name: string } | null; installed: string[]; skipped: { id: string; reason: string }[] }, fallback: string) => {
+    const skippedOpen = r.skipped.filter((s) => s.reason === "open").length;
+    const others = r.skipped.filter((s) => s.reason !== "open");
+    setNote(
+      [
+        t("exv.installed", { name: r.extension?.name ?? fallback, n: r.installed.length }),
+        skippedOpen > 0 ? t("exv.skippedOpen", { n: skippedOpen }) : "",
+        others.length > 0 ? others.map((s) => `${nameOf(s.id)}: ${reason(s.reason)}`).join("; ") : "",
+        "routes" in r && r.installed.length > 0 ? t("exv.fetchedVia", { n: r.routes }) : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
+    );
+  };
+
+  const installFile = async (f: File) => {
     setBusy(true);
     setError(null);
     setNote(null);
@@ -53,20 +89,8 @@ export function ExtensionsView({ profiles }: { profiles: Profile[] }) {
         r.onload = () => resolve(String(r.result).split(",", 2)[1] ?? "");
         r.readAsDataURL(f);
       });
-      const r = await api.installExtensionMany([...targets], b64);
-      const skippedOpen = r.skipped.filter((s) => s.reason === "open").length;
-      setNote(
-        [
-          t("exv.installed", { name: r.extension?.name ?? f.name, n: r.installed.length }),
-          skippedOpen > 0 ? t("exv.skippedOpen", { n: skippedOpen }) : "",
-          r.skipped.length - skippedOpen > 0
-            ? r.skipped.filter((s) => s.reason !== "open").map((s) => s.reason).join("; ")
-            : "",
-        ]
-          .filter(Boolean)
-          .join(" "),
-      );
-      setPicking(false);
+      report(await api.installExtensionMany([...targets], b64), f.name);
+      setPicking(null);
       await load();
     } catch (e) {
       setError(say(e));
@@ -76,12 +100,34 @@ export function ExtensionsView({ profiles }: { profiles: Profile[] }) {
     }
   };
 
+  const installStore = async (id: string, name: string) => {
+    setBusy(true);
+    setError(null);
+    setNote(null);
+    try {
+      report(await api.installExtensionFromStore([...targets], id), name);
+      setPicking(null);
+      await load();
+    } catch (e) {
+      setError(say(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const nameOf = (id: string) => profiles.find((p) => p.id === id)?.name ?? id;
+  const carriers = (extId: string) => rows?.find((x) => x.id === extId)?.profiles.length ?? 0;
+  const targetsWithoutProxy = [...targets].filter((id) => !profiles.find((p) => p.id === id)?.proxy_id).length;
+  const pastedId = byId.match(ID_IN_TEXT)?.[0] ?? null;
 
   return (
     <>
       <div className="toolbar">
-        <button className="primary" disabled={busy || local.length === 0} onClick={() => setPicking((v) => !v)}>
+        <button
+          className="primary"
+          disabled={busy || local.length === 0}
+          onClick={() => setPicking((v) => (v?.mode === "file" ? null : { mode: "file" }))}
+        >
           {t("exv.add")}
         </button>
         <div className="spacer" />
@@ -118,27 +164,96 @@ export function ExtensionsView({ profiles }: { profiles: Profile[] }) {
             <button className="linky" onClick={() => setTargets(new Set(local.map((p) => p.id)))}>{t("exv.all")}</button>
             <button className="linky" onClick={() => setTargets(new Set())}>{t("exv.clear")}</button>
             <div className="spacer" />
-            <input
-              ref={file}
-              type="file"
-              accept=".crx"
-              style={{ display: "none" }}
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void install(f);
-              }}
-            />
-            <button className="primary" disabled={busy || targets.size === 0} onClick={() => file.current?.click()}>
-              {busy ? t("ck.working") : t("exv.chooseFile", { n: targets.size })}
-            </button>
+            {picking.mode === "file" ? (
+              <>
+                <input
+                  ref={file}
+                  type="file"
+                  accept=".crx"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void installFile(f);
+                  }}
+                />
+                <button className="primary" disabled={busy || targets.size === 0} onClick={() => file.current?.click()}>
+                  {busy ? t("ck.working") : t("exv.chooseFile", { n: targets.size })}
+                </button>
+              </>
+            ) : (
+              <button
+                className="primary"
+                disabled={busy || targets.size === 0}
+                onClick={() => void installStore(picking.id, picking.name)}
+              >
+                {busy ? t("ck.working") : t("exv.storeTarget", { name: picking.name, n: targets.size })}
+              </button>
+            )}
+            <button className="ghost" disabled={busy} onClick={() => setPicking(null)}>{t("ui.cancel")}</button>
           </div>
-          <p className="hint">{t("ext.hint")}</p>
+          {picking.mode === "store" && targetsWithoutProxy > 0 && (
+            <p className="hint warn">{t("exv.noProxyWarn", { n: targetsWithoutProxy })}</p>
+          )}
+          {picking.mode === "file" && <p className="hint">{t("ext.hint")}</p>}
         </div>
       )}
 
       {note && <div className="notice">{note}</div>}
       {error && <div className="notice warnBar">{error}</div>}
 
+      <h2 className="sectionTitle">{t("exv.catalogue")}</h2>
+      <p className="hint" style={{ maxWidth: 720 }}>{t("exv.catalogueHint")}</p>
+      {catalogue.length > 0 && (
+        <table className="grid" style={{ marginBottom: "var(--s-4)" }}>
+          <tbody>
+            {catalogue.map((c) => {
+              const n = carriers(c.id);
+              return (
+                <tr key={c.id}>
+                  <td style={{ minWidth: 180 }}>
+                    <div className="name">{c.name}</div>
+                    <div className="muted small">
+                      <a href={c.homepage} target="_blank" rel="noreferrer">{c.homepage.replace(/^https:\/\//, "")}</a> · {c.licence}
+                    </div>
+                  </td>
+                  <td className="muted" style={{ maxWidth: 420 }}>{language === "ru" ? c.summary.ru : c.summary.en}</td>
+                  <td className="muted small" style={{ whiteSpace: "nowrap" }}>
+                    {n > 0 ? t("exv.inN", { n, m: local.length }) : t("exv.notInstalled")}
+                  </td>
+                  <td className="actions">
+                    <button
+                      className="ghost"
+                      disabled={busy || local.length === 0}
+                      onClick={() => setPicking({ mode: "store", id: c.id, name: c.name })}
+                    >
+                      {t("exv.installInto")}
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+      <div className="row" style={{ marginBottom: "var(--s-5)", maxWidth: 720 }}>
+        <span className="muted small" style={{ whiteSpace: "nowrap" }}>{t("exv.byId")}</span>
+        <input
+          value={byId}
+          spellCheck={false}
+          placeholder="https://chromewebstore.google.com/detail/…/hlkenndednhfkekhgcdicdfddnkalmdm"
+          style={{ fontFamily: "var(--mono)", fontSize: 12 }}
+          onChange={(e) => setById(e.target.value)}
+        />
+        <button
+          className="ghost"
+          disabled={busy || !pastedId || local.length === 0}
+          onClick={() => pastedId && setPicking({ mode: "store", id: pastedId, name: pastedId.slice(0, 8) + "…" })}
+        >
+          {t("exv.byIdGo")}
+        </button>
+      </div>
+
+      <h2 className="sectionTitle">{t("exv.extension")}</h2>
       <div className="tableWrap">
         {rows === null ? (
           <p className="empty pad">{t("ext.loading")}</p>

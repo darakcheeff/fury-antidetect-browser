@@ -2836,6 +2836,23 @@ pub async fn install_extension_many(profile_ids: Vec<String>, crx_b64: String) -
     .await?)
 }
 
+/// The shipped catalogue (shared/extensions/catalogue.json via the agent).
+#[tauri::command]
+pub async fn extension_catalogue() -> R<serde_json::Value> {
+    Ok(crate::agent::call("extensions.catalogue", serde_json::json!({})).await?)
+}
+
+/// Install by Web Store id. The agent fetches the package through each
+/// profile's own proxy and checks the key derives the id (docs/12, B).
+#[tauri::command]
+pub async fn install_extension_from_store(profile_ids: Vec<String>, ext_id: String) -> R<serde_json::Value> {
+    Ok(crate::agent::call(
+        "extensions.install_from_store",
+        serde_json::json!({ "profile_ids": profile_ids, "ext_id": ext_id }),
+    )
+    .await?)
+}
+
 #[tauri::command]
 pub async fn remove_extension(profile_id: String, id: String) -> R<serde_json::Value> {
     Ok(crate::agent::call(
