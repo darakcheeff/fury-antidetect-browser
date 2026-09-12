@@ -5,6 +5,7 @@ import { useI18n } from "../i18n";
 import { Icon, IconButton } from "./Icon";
 import type { Me, Profile } from "../api";
 import { platformOf } from "../platform";
+import { assess } from "../consistency";
 
 /** Every row's controls follow the permissions the SERVER resolved. Hiding a
  *  button is presentation, not protection — the server refuses regardless — but
@@ -49,6 +50,9 @@ export function ProfileTable({
   onDelete,
   onExtensions,
   onNetwork,
+  onClone,
+  personas,
+  sharing,
   selected,
   onToggle,
   onToggleAll,
@@ -69,6 +73,13 @@ export function ProfileTable({
   onExtensions?: (p: Profile) => void;
   /** What network this profile is on, step by step. Opens from the proxy cell. */
   onNetwork?: (p: Profile) => void;
+  /** Copies of this one — the same dialog the selection bar opens (5.24). */
+  onClone?: (p: Profile) => void;
+  /** The catalogue's persona ids, so a row on a persona that no longer exists
+   *  says so before Open is pressed. Null while unknown. */
+  personas?: Set<string> | null;
+  /** Profile id → how many profiles come out of the same exit (consistency.ts). */
+  sharing?: Map<string, number>;
   selected: Set<string>;
   onToggle: (id: string) => void;
   onToggleAll: () => void;
@@ -126,6 +137,12 @@ export function ProfileTable({
           const canEdit = p.permissions.includes("edit_profile");
           const locked = p.lock !== null;
           const open = isOpenHere(p, { local, userId: me?.user_id, machine: thisMachine });
+          // What the row says about itself (docs/12 B). A red verdict disables
+          // Open with the reason: the contradiction is the ban, not the
+          // fingerprint, and a warning that scrolls past is not a guard.
+          const shared = sharing?.get(p.id) ?? 0;
+          const verdict = assess(p, personas ?? null, shared);
+          const verdictText = verdict.notes.map((n) => t(n.key, n.vars)).join(" · ");
 
           return (
             <tr key={p.id} className={selected.has(p.id) ? "picked" : undefined}>
@@ -179,6 +196,14 @@ export function ProfileTable({
                       <span className="markN">{p.shared_with}</span>
                     </span>
                   )}
+                  {/* The consistency verdict, only when there is one to give.
+                      A tick on every consistent row would be a column of
+                      ticks; silence is the tick. */}
+                  {verdict.level !== "ok" && (
+                    <span className={`mark verdict ${verdict.level}`} title={verdictText}>
+                      <Icon name="alert" size={13} />
+                    </span>
+                  )}
                 </div>
                 {p.tags.length > 0 && (
                   <div className="tags">{p.tags.map((t) => <span key={t}>{t}</span>)}</div>
@@ -207,6 +232,11 @@ export function ProfileTable({
                           reveal_secrets; say so, or a masked value reads like a
                           bug rather than a boundary. */}
                       {!canReveal && ` · ${t("row.masked")}`}
+                      {/* How many profiles a site sees from this exit (docs/12 C).
+                          Said from two; coloured from three. */}
+                      {shared >= 2 && (
+                        <span className={shared >= 3 ? "warn" : undefined}> · {t("row.sharedExit", { n: shared })}</span>
+                      )}
                     </div>
                   </>
                 ) : (
@@ -240,7 +270,11 @@ export function ProfileTable({
               <td className="actions">
                 <div>
                 {!open && !locked && canLaunch && (
-                  <button disabled={busy} onClick={() => onLaunch(p)}>
+                  <button
+                    disabled={busy || verdict.level === "block"}
+                    title={verdict.level === "block" ? `${t("row.fixFirst")}: ${verdictText}` : undefined}
+                    onClick={() => onLaunch(p)}
+                  >
                     {t("row.open")}
                   </button>
                 )}
@@ -269,6 +303,9 @@ export function ProfileTable({
                 )}
                 {onEdit && canEdit && (
                   <IconButton icon="pencil" label={t("row.edit")} disabled={busy} onClick={() => onEdit(p)} />
+                )}
+                {onClone && canEdit && (
+                  <IconButton icon="copy" label={t("bp.clone")} disabled={busy} onClick={() => onClone(p)} />
                 )}
                 {onDelete && canDelete && (
                   <IconButton

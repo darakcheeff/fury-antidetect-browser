@@ -1525,3 +1525,8 @@ ol.steps .stepName { color: var(--text-dim); }
   vertical-align: middle;
   flex: none;
 }
+
+/* The row's consistency verdict (consistency.ts): amber is a heuristic, red
+   disables Open. */
+.mark.verdict.warn { color: var(--warn); }
+.mark.verdict.block { color: var(--accent); }

@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "./i18n";
-import { api, ApiError, type Me, type MirrorStatus, type Profile, type Project, type Shell, type WarmProgress } from "./api";
+import { api, ApiError, type LocalProxy, type Me, type MirrorStatus, type Profile, type Project, type Shell, type WarmProgress } from "./api";
 import { Login } from "./components/Login";
 import { ProfileDialog } from "./components/ProfileDialog";
 import { BulkProfiles } from "./components/BulkProfiles";
@@ -26,6 +26,7 @@ import { Sidebar, type View } from "./components/Sidebar";
 import { ShareDialog } from "./components/ShareDialog";
 import { IconButton } from "./components/Icon";
 import { useTheme } from "./theme";
+import { exitSharing } from "./consistency";
 
 export function App() {
   // The shell answers what the interface cannot know on its own: whether this
@@ -45,6 +46,11 @@ export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [active, setActive] = useState<Project | null>(null);
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  // For the row verdicts (consistency.ts): which personas exist, and which
+  // exit each proxy was last seen coming out of. Both are cheap lists the
+  // agent already keeps; refreshed with the rows.
+  const [personaIds, setPersonaIds] = useState<Set<string> | null>(null);
+  const [proxyList, setProxyList] = useState<LocalProxy[] | null>(null);
   const [shared, setShared] = useState<Profile[]>([]);
   /** The profiles a share dialog is open for, or null. */
   const [sharing, setSharing] = useState<Profile[] | null>(null);
@@ -209,6 +215,10 @@ export function App() {
       setProfiles(rows);
       setProjects(list);
       setShell(current);
+      // Not awaited with the rows: a failure here costs the verdicts, not
+      // the list.
+      void api.personas().then((ps) => setPersonaIds(new Set(ps.map((x) => x.id))), () => {});
+      void api.proxies().then(setProxyList, () => {});
       // A launch notice outlives its launch by exactly one poll.
       //
       // Here rather than in the Close button, because the browser is closed
@@ -393,6 +403,10 @@ export function App() {
         (tag === "\u0000none" ? p.tags.length === 0 : p.tags.includes(tag)),
     )
     .filter((p) => !openOnly || p.running);
+
+  // Exit sharing over EVERY profile, not the filtered view: the question is
+  // how many accounts a site sees from one address.
+  const exitCounts = exitSharing(profiles, proxyList);
 
   const toggle = (id: string) =>
     setSelected((prev) => {
@@ -1186,6 +1200,9 @@ export function App() {
               onEdit={setEditing}
               onExtensions={setExtFor}
               onNetwork={setNetFor}
+              onClone={(p) => setBulk(p)}
+              personas={personaIds}
+              sharing={exitCounts}
               /* Offered always, and gated per row rather than per mode.
                  It used to be handed over only in local mode, so connecting to
                  a server removed the delete button from EVERY row -- including
