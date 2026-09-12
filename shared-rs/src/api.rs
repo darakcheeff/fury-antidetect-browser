@@ -54,6 +54,10 @@ pub struct ProfileSummary {
     pub notes: String,
     #[serde(default)]
     pub start_urls: Vec<String>,
+    /// The account's own stage — "warming", "banned", whatever the operator
+    /// calls it. Empty when none. Not the lock, which is `lock` above.
+    #[serde(default)]
+    pub status: String,
 }
 
 /// Proxy as shown to a user *without* `reveal_secrets`: enough to tell profiles

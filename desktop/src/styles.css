@@ -1530,3 +1530,16 @@ ol.steps .stepName { color: var(--text-dim); }
    disables Open. */
 .mark.verdict.warn { color: var(--warn); }
 .mark.verdict.block { color: var(--accent); }
+
+/* The account's stage, under the lock state in the Status column. */
+.stage {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  line-height: 16px;
+  background: var(--surface-2, rgba(128,128,128,.18));
+  color: var(--text-dim);
+  white-space: nowrap;
+}

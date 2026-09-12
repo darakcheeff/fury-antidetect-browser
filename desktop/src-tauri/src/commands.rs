@@ -1049,6 +1049,9 @@ pub struct UiProfile {
     pub notes: String,
     #[serde(default)]
     pub start_urls: Vec<String>,
+    /// The account's stage — "warming", "banned" — free text, empty is none.
+    #[serde(default)]
+    pub status: String,
     pub tags: Vec<String>,
     pub persona_id: String,
     /// Zero in team mode: the server never exposes a seed, and nothing in the
@@ -1168,6 +1171,7 @@ async fn local_profiles() -> R<Vec<UiProfile>> {
             permissions: all_permissions(),
             blocklists: p.blocklists,
             notes: p.notes,
+            status: p.status,
             start_urls: p.start_urls,
             lock: None,
             running: p.running,
@@ -1217,6 +1221,7 @@ pub async fn profiles(
                 permissions: all_permissions(),
                 blocklists: p.blocklists,
                 notes: p.notes,
+                status: p.status,
                 start_urls: p.start_urls,
                 lock: None,
                 running: p.running,
@@ -1261,6 +1266,7 @@ pub async fn profiles(
                 permissions: all_permissions(),
                 blocklists: p.blocklists,
                 notes: p.notes,
+                status: p.status,
                 start_urls: p.start_urls,
                 lock: None,
                 running: p.running,
@@ -1316,6 +1322,7 @@ pub async fn profiles(
             permissions: p.permissions.iter().map(|v| perm_name(v)).collect(),
             blocklists: Vec::new(),
             notes: p.notes,
+            status: p.status,
             start_urls: p.start_urls,
             lock: p.lock.as_ref().map(|l| serde_json::json!({
                 "user_id": l.user_id.to_string(),
@@ -2312,6 +2319,7 @@ pub async fn save_profile(
     let body = serde_json::json!({
         "name": s("name"),
         "notes": s("notes"),
+        "status": s("status"),
         "tags": list("tags"),
         "timezone": s("timezone"),
         "languages": list("languages"),
@@ -2435,6 +2443,7 @@ pub async fn trash(state: State<'_, AppState>) -> R<Vec<UiProfile>> {
             permissions: all_permissions(),
             blocklists: Vec::new(),
             notes: String::new(),
+            status: String::new(),
             start_urls: Vec::new(),
             lock: None,
             running: false,
@@ -3282,6 +3291,7 @@ pub async fn shared_with_me(state: State<'_, AppState>) -> R<Vec<UiProfile>> {
                 .collect(),
             blocklists: Vec::new(),
             notes: String::new(),
+            status: String::new(),
             start_urls: Vec::new(),
             lock: None,
             running: false,

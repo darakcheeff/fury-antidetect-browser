@@ -85,6 +85,9 @@ pub struct LocalProfile {
     pub name: String,
     #[serde(default)]
     pub notes: String,
+    /// The account's stage, free text; empty is none (docs/16 5.5).
+    #[serde(default)]
+    pub status: String,
     pub tags: Vec<String>,
     pub persona_id: String,
     pub fp_seed: i64,

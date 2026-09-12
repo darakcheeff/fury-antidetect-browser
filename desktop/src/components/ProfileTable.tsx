@@ -6,6 +6,7 @@ import { Icon, IconButton } from "./Icon";
 import type { Me, Profile } from "../api";
 import { platformOf } from "../platform";
 import { assess } from "../consistency";
+import { isSuggested, statusHue } from "../status";
 
 /** Every row's controls follow the permissions the SERVER resolved. Hiding a
  *  button is presentation, not protection — the server refuses regardless — but
@@ -260,6 +261,20 @@ export function ProfileTable({
                   </span>
                 )}
                 {!open && !locked && <span className="state free">{t("row.idle")}</span>}
+                {/* The account's own stage beside the lock's state (5.5).
+                    Known stages are translated and coloured; anything else is
+                    shown as typed. */}
+                {p.status && (() => {
+                  const hue = statusHue(p.status);
+                  return (
+                    <div
+                      className="stage"
+                      style={hue === null ? undefined : { background: `hsl(${hue} 45% 22%)`, color: `hsl(${hue} 70% 80%)` }}
+                    >
+                      {isSuggested(p.status) ? t(`status.${p.status.trim().toLowerCase()}` as never) : p.status}
+                    </div>
+                  );
+                })()}
               </td>
               <td className="muted small">
                 {/* docs/12: the metric that matters to someone running accounts

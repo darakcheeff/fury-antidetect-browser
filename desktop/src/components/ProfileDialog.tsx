@@ -3,6 +3,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useI18n } from "../i18n";
+import { SUGGESTED } from "../status";
 import { api, type DomainList, type LocalProxy, type Persona, type Preview, type Profile } from "../api";
 import { Logins } from "./Logins";
 
@@ -124,6 +125,7 @@ export function ProfileDialog({
   // touched only the name erased the notes and the start URLs.
   const [startUrls, setStartUrls] = useState((editing?.start_urls ?? []).join("\n"));
   const [notes, setNotes] = useState(editing?.notes ?? "");
+  const [status, setStatus] = useState(editing?.status ?? "");
   // Domain lists the relay applies to this profile. Local profiles only — a
   // team profile's record lives on the server, which does not carry them.
   const [lists, setLists] = useState<DomainList[]>([]);
@@ -200,6 +202,7 @@ export function ProfileDialog({
         project_id: editing ? editing.project_id : projectId,
         name: name.trim() || "Untitled",
         notes,
+        status: status.trim(),
         tags: splitList(tags),
         persona_id: personaId,
         // Zero means "assign one": the seed is generated once, on creation, and
@@ -272,6 +275,24 @@ export function ProfileDialog({
                       placeholder="Shop DE"
                       onChange={(e) => setName(e.target.value)}
                     />
+                  </div>
+                </div>
+                <div className="field">
+                  <label htmlFor="p-status">{t("pd.status")}</label>
+                  <div>
+                    <input
+                      id="p-status"
+                      list="p-status-options"
+                      value={status}
+                      placeholder={t("pd.statusPlaceholder")}
+                      onChange={(e) => setStatus(e.target.value)}
+                    />
+                    <datalist id="p-status-options">
+                      {SUGGESTED.map((s) => (
+                        <option key={s} value={s}>{t(`status.${s}`)}</option>
+                      ))}
+                    </datalist>
+                    <p className="hint">{t("pd.statusHint")}</p>
                   </div>
                 </div>
                 <div className="field">

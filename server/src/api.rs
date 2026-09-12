@@ -1049,6 +1049,7 @@ async fn profiles_in(
                     shared_with: 0,
                     notes: String::new(),
                     start_urls: Vec::new(),
+                    status: String::new(),
                     id,
                     project_id,
                     project_name,
@@ -1115,15 +1116,16 @@ async fn with_share_counts(
         return Ok(rows);
     }
     let ids: Vec<Uuid> = rows.iter().map(|r| r.id).collect();
-    let details: Vec<(Uuid, String, Vec<String>)> =
-        sqlx::query_as("SELECT id, notes, start_urls FROM profiles WHERE id = ANY($1)")
+    let details: Vec<(Uuid, String, Vec<String>, String)> =
+        sqlx::query_as("SELECT id, notes, start_urls, status FROM profiles WHERE id = ANY($1)")
             .bind(&ids)
             .fetch_all(&mut *db)
             .await?;
-    for (id, notes, start_urls) in details {
+    for (id, notes, start_urls, status) in details {
         if let Some(row) = rows.iter_mut().find(|r| r.id == id) {
             row.notes = notes;
             row.start_urls = start_urls;
+            row.status = status;
         }
     }
     let counts: Vec<(Uuid, i64)> = sqlx::query_as(
@@ -1806,6 +1808,8 @@ pub struct NewProfileRequest {
     start_urls: Vec<String>,
     #[serde(default)]
     notes: String,
+    #[serde(default)]
+    status: String,
 }
 
 /// Create a profile in a project.
@@ -1870,7 +1874,7 @@ async fn create_profile(
 
     let id = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO profiles (id, org_id, project_id, name, notes, tags, persona_id, fp_seed,                                timezone, languages, proxy_id, start_urls, created_by)          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+        "INSERT INTO profiles (id, org_id, project_id, name, notes, tags, persona_id, fp_seed,                                timezone, languages, proxy_id, start_urls, created_by, status)          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
     )
     .bind(id)
     .bind(caller.org_id)
@@ -1885,6 +1889,7 @@ async fn create_profile(
     .bind(req.proxy_id)
     .bind(&req.start_urls)
     .bind(caller.user_id)
+    .bind(req.status.trim())
     .execute(db.as_mut())
     .await?;
 
@@ -2268,6 +2273,8 @@ pub struct EditProfileRequest {
     proxy_id: Uuid,
     #[serde(default)]
     start_urls: Vec<String>,
+    #[serde(default)]
+    status: String,
 }
 
 /// Change a profile. Never its persona or its seed.
@@ -2329,7 +2336,7 @@ async fn edit_profile(
 
     sqlx::query(
         "UPDATE profiles SET name = $1, notes = $2, tags = $3, timezone = $4, \
-                             languages = $5, proxy_id = $6, start_urls = $7 \
+                             languages = $5, proxy_id = $6, start_urls = $7, status = $9 \
          WHERE id = $8 AND deleted_at IS NULL",
     )
     .bind(req.name.trim())
@@ -2340,6 +2347,7 @@ async fn edit_profile(
     .bind(req.proxy_id)
     .bind(&req.start_urls)
     .bind(profile_id)
+    .bind(req.status.trim())
     .execute(db.as_mut())
     .await?;
 

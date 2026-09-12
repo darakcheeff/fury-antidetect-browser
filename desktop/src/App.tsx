@@ -27,6 +27,7 @@ import { ShareDialog } from "./components/ShareDialog";
 import { IconButton } from "./components/Icon";
 import { useTheme } from "./theme";
 import { exitSharing } from "./consistency";
+import { isSuggested } from "./status";
 
 export function App() {
   // The shell answers what the interface cannot know on its own: whether this
@@ -59,6 +60,8 @@ export function App() {
   const [editing, setEditing] = useState<Profile | null | undefined>(undefined);
   const [query, setQuery] = useState("");
   const [tag, setTag] = useState("");
+  // The stage filter (5.5): "" is every stage, "\u0000none" is no stage.
+  const [stage, setStage] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   /** `undefined` closed, `null` making new ones, a profile means copying it. */
   const [bulk, setBulk] = useState<Profile | null | undefined>(undefined);
@@ -395,6 +398,8 @@ export function App() {
   // a tag list allows several — and two ways to sort the same profiles is one
   // too many. Projects are the unit that carries access, so nothing was lost.
   const tags = Array.from(new Set(profiles.flatMap((p) => p.tags))).sort();
+  // Stages in use, lower-cased so "Banned" and "banned" are one filter.
+  const stages = Array.from(new Set(profiles.map((p) => (p.status ?? "").trim().toLowerCase()).filter(Boolean))).sort();
 
   const shown = matching(profiles, query)
     .filter(
@@ -402,6 +407,7 @@ export function App() {
         tag === "" ||
         (tag === "\u0000none" ? p.tags.length === 0 : p.tags.includes(tag)),
     )
+    .filter((p) => stage === "" || (stage === "\u0000none" ? !p.status : (p.status ?? "").trim().toLowerCase() === stage))
     .filter((p) => !openOnly || p.running);
 
   // Exit sharing over EVERY profile, not the filtered view: the question is
@@ -866,6 +872,17 @@ export function App() {
                 {tags.map((x) => (
                   <option key={x} value={x}>
                     {x}
+                  </option>
+                ))}
+              </select>
+            )}
+            {stages.length > 0 && (
+              <select style={{ width: "auto" }} value={stage} onChange={(e) => setStage(e.target.value)}>
+                <option value="">{t("bar.allStages")}</option>
+                <option value={"\u0000none"}>{t("bar.noStage")}</option>
+                {stages.map((x) => (
+                  <option key={x} value={x}>
+                    {isSuggested(x) ? t(`status.${x}` as never) : x} ({profiles.filter((p) => (p.status ?? "").trim().toLowerCase() === x).length})
                   </option>
                 ))}
               </select>

@@ -104,6 +104,8 @@ export interface Profile {
    *  and the editor wrote the absence back on every save. */
   notes?: string;
   start_urls?: string[];
+  /** The account's stage — see status.ts. Empty is none. */
+  status?: string;
   tags: string[];
   persona_id: string;
   /** Zero in team mode — the server never exposes a seed. */
