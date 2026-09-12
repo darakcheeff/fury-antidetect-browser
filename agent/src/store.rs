@@ -831,6 +831,25 @@ impl Store {
         Ok(id)
     }
 
+    /// A new fingerprint seed for an existing profile. Separate from `upsert`
+    /// on purpose: upsert never touches the seed, because an editor that could
+    /// change it in passing would give a warmed account a different fingerprint
+    /// without anyone meaning to. This is the meant version — asked for by
+    /// name, confirmed in the interface, refused while the browser is open.
+    pub async fn reseed_profile(&self, id: &str) -> anyhow::Result<i64> {
+        let seed = random_seed();
+        let n = sqlx::query("UPDATE profiles SET fp_seed = ? WHERE id = ? AND deleted_at IS NULL")
+            .bind(seed)
+            .bind(id)
+            .execute(&self.pool)
+            .await?
+            .rows_affected();
+        if n == 0 {
+            anyhow::bail!("no such profile");
+        }
+        Ok(seed)
+    }
+
     pub async fn delete_profile(&self, id: &str) -> anyhow::Result<()> {
         sqlx::query("UPDATE profiles SET deleted_at = ? WHERE id = ?")
             .bind(now())

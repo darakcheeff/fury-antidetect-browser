@@ -46,6 +46,14 @@ pub struct ProfileSummary {
     /// hundred requests to draw one icon.
     #[serde(default)]
     pub shared_with: i64,
+    /// The operator's own note on the profile. Carried in the listing because
+    /// the editor opens from a row, and an editor that opens on an empty notes
+    /// box and saves it wrote the emptiness back — which is what happened until
+    /// 12.09.2026, to notes and to start URLs alike.
+    #[serde(default)]
+    pub notes: String,
+    #[serde(default)]
+    pub start_urls: Vec<String>,
 }
 
 /// Proxy as shown to a user *without* `reveal_secrets`: enough to tell profiles

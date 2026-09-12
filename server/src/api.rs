@@ -921,6 +921,8 @@ async fn profiles_in(
                     // sixteen-column limit for tuples, and one more would have
                     // meant a named struct for a single integer.
                     shared_with: 0,
+                    notes: String::new(),
+                    start_urls: Vec::new(),
                     id,
                     project_id,
                     project_name,
@@ -967,13 +969,18 @@ async fn profiles_in(
     Ok(Json(with_share_counts(&mut *db, out).await?))
 }
 
-/// Fill in how many people hold each of these profiles.
+/// Fill in what the listing query could not carry: how many people hold each
+/// profile, its notes and its start URLs.
 ///
-/// One query for the whole page rather than a column on the listing query: that
-/// row is already at sqlx's sixteen-element limit for tuple decoding, and one
-/// more would have meant a named struct to carry a single integer. It is also
-/// one query rather than one per row, which is the part that matters on a
-/// project with two hundred profiles.
+/// Separate queries for the whole page rather than columns on the listing
+/// query: that row is already at sqlx's sixteen-element limit for tuple
+/// decoding. Two queries rather than one per row, which is the part that
+/// matters on a project with two hundred profiles.
+///
+/// Notes and start URLs joined this function on 12.09.2026 for a reason that
+/// is a bug report: the editor opens from a row, filled the two boxes from the
+/// row, found nothing there, and saved nothing back. Every edit of a team
+/// profile through the desktop erased both.
 async fn with_share_counts(
     db: &mut sqlx::PgConnection,
     mut rows: Vec<ProfileSummary>,
@@ -982,6 +989,17 @@ async fn with_share_counts(
         return Ok(rows);
     }
     let ids: Vec<Uuid> = rows.iter().map(|r| r.id).collect();
+    let details: Vec<(Uuid, String, Vec<String>)> =
+        sqlx::query_as("SELECT id, notes, start_urls FROM profiles WHERE id = ANY($1)")
+            .bind(&ids)
+            .fetch_all(&mut *db)
+            .await?;
+    for (id, notes, start_urls) in details {
+        if let Some(row) = rows.iter_mut().find(|r| r.id == id) {
+            row.notes = notes;
+            row.start_urls = start_urls;
+        }
+    }
     let counts: Vec<(Uuid, i64)> = sqlx::query_as(
         "SELECT profile_id, count(*) FROM profile_grants \
          WHERE profile_id = ANY($1) AND wrapped_key IS NOT NULL \

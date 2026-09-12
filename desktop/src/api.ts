@@ -100,6 +100,10 @@ export interface Profile {
   /** Where it is filed, so the flat list can show it without a call per row. */
   project_name: string | null;
   name: string;
+  /** Round-tripped by the editor; both were absent from the row until 12.09.2026,
+   *  and the editor wrote the absence back on every save. */
+  notes?: string;
+  start_urls?: string[];
   tags: string[];
   persona_id: string;
   /** Zero in team mode — the server never exposes a seed. */
@@ -767,6 +771,12 @@ export const api = {
     cmd<Extension>("install_extension", { profileId, crxB64 }),
   removeExtension: (profileId: string, id: string): Promise<unknown> =>
     cmd("remove_extension", { profileId, id }),
+
+  /** A fresh fingerprint seed. Refused while the profile is open. Everything a
+   *  site tied to the old fingerprint stops matching — which is the point, and
+   *  the reason the interface confirms first. */
+  reseedProfile: (id: string, origin?: Origin): Promise<{ id: string; fp_seed: number }> =>
+    cmd("reseed_profile", { id, origin: origin ?? null }),
 
   /** How big a profile is on disk and how much of it is cache. */
   profileUsage: (id: string): Promise<Usage> => cmd<Usage>("profile_usage", { id }),

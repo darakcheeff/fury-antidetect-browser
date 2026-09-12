@@ -75,7 +75,7 @@ export function ProfileDialog({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const { t } = useI18n();
+  const { t, say } = useI18n();
   const [tab, setTab] = useState<Tab>("General");
   const [personas, setPersonas] = useState<Persona[]>([]);
   // The picked machine is chosen at random from twenty-six, so it is usually
@@ -87,6 +87,10 @@ export function ProfileDialog({
   const [preview, setPreview] = useState<Preview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Two clicks, not one: the first shows what a new seed costs, the second
+  // does it. A confirmation dialog on top of a dialog reads as an error.
+  const [reseedArmed, setReseedArmed] = useState(false);
+  const [reseeded, setReseeded] = useState<number | null>(null);
   // "configure" edits the fields below and saves a proxy with the profile;
   // "saved" picks one that already exists. AdsPower's split, and it is the
   // right one: the first proxy anyone adds is added while making a profile, and
@@ -116,8 +120,10 @@ export function ProfileDialog({
   // follow-the-exit path unreachable, because the field was never empty.
   const [timezone, setTimezone] = useState(editing?.timezone ?? "");
   const [languages, setLanguages] = useState((editing?.languages ?? []).join(", "));
-  const [startUrls, setStartUrls] = useState("");
-  const [notes, setNotes] = useState("");
+  // From the row. Both used to start empty and be saved empty: an edit that
+  // touched only the name erased the notes and the start URLs.
+  const [startUrls, setStartUrls] = useState((editing?.start_urls ?? []).join("\n"));
+  const [notes, setNotes] = useState(editing?.notes ?? "");
   // Domain lists the relay applies to this profile. Local profiles only — a
   // team profile's record lives on the server, which does not carry them.
   const [lists, setLists] = useState<DomainList[]>([]);
@@ -545,6 +551,47 @@ export function ProfileDialog({
                     </p>
                   </div>
                 </div>
+                {editing && editing.origin !== "team" && (
+                  <div className="field" style={{ marginTop: "var(--s-4)" }}>
+                    <label>{t("pd.seed")}</label>
+                    <div>
+                      <p className="hint">{t("pd.seedHint")}</p>
+                      {!reseedArmed ? (
+                        <button className="ghost" disabled={busy || editing.running} title={editing.running ? t("row.closeFirst") : undefined}
+                          onClick={() => setReseedArmed(true)}>
+                          {t("pd.reseed")}
+                        </button>
+                      ) : (
+                        <div className="verdict bad">
+                          <div>{t("pd.reseedWarn")}</div>
+                          <div className="row" style={{ marginTop: "var(--s-2)" }}>
+                            <button className="danger" disabled={busy}
+                              onClick={async () => {
+                                setBusy(true);
+                                setError(null);
+                                try {
+                                  const r = await api.reseedProfile(editing.id, editing.origin);
+                                  setReseeded(r.fp_seed);
+                                  setReseedArmed(false);
+                                  // The preview reads the seed from `editing`; a
+                                  // re-roll is a new noise stream, so re-fetch.
+                                  editing.fp_seed = r.fp_seed;
+                                } catch (e) {
+                                  setError(say(e));
+                                } finally {
+                                  setBusy(false);
+                                }
+                              }}>
+                              {t("pd.reseedConfirm")}
+                            </button>
+                            <button className="ghost" onClick={() => setReseedArmed(false)}>{t("ui.cancel")}</button>
+                          </div>
+                        </div>
+                      )}
+                      {reseeded !== null && <p className="hint">{t("pd.reseeded")}</p>}
+                    </div>
+                  </div>
+                )}
               </>
             )}
 

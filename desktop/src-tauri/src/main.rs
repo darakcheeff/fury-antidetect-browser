@@ -143,6 +143,7 @@ fn main() {
             commands::remove_extension,
             commands::profile_usage,
             commands::trim_profile,
+            commands::reseed_profile,
             commands::blocklists,
             commands::read_blocklist,
             commands::save_blocklist,

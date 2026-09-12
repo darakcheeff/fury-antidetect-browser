@@ -913,6 +913,12 @@ pub struct UiProfile {
     /// Where it is filed, for the flat list to show without a request per row.
     pub project_name: Option<String>,
     pub name: String,
+    /// Round-tripped by the editor. Absent from the row until 12.09.2026, and
+    /// the editor saved the absence back — every edit erased both.
+    #[serde(default)]
+    pub notes: String,
+    #[serde(default)]
+    pub start_urls: Vec<String>,
     pub tags: Vec<String>,
     pub persona_id: String,
     /// Zero in team mode: the server never exposes a seed, and nothing in the
@@ -1031,6 +1037,8 @@ async fn local_profiles() -> R<Vec<UiProfile>> {
             }),
             permissions: all_permissions(),
             blocklists: p.blocklists,
+            notes: p.notes,
+            start_urls: p.start_urls,
             lock: None,
             running: p.running,
             last_opened_at: p.last_opened_at,
@@ -1078,6 +1086,8 @@ pub async fn profiles(
                 }),
                 permissions: all_permissions(),
                 blocklists: p.blocklists,
+                notes: p.notes,
+                start_urls: p.start_urls,
                 lock: None,
                 running: p.running,
                 last_opened_at: p.last_opened_at,
@@ -1120,6 +1130,8 @@ pub async fn profiles(
                 }),
                 permissions: all_permissions(),
                 blocklists: p.blocklists,
+                notes: p.notes,
+                start_urls: p.start_urls,
                 lock: None,
                 running: p.running,
                 last_opened_at: p.last_opened_at,
@@ -1173,6 +1185,8 @@ pub async fn profiles(
             }),
             permissions: p.permissions.iter().map(|v| perm_name(v)).collect(),
             blocklists: Vec::new(),
+            notes: p.notes,
+            start_urls: p.start_urls,
             lock: p.lock.as_ref().map(|l| serde_json::json!({
                 "user_id": l.user_id.to_string(),
                 "user_email": l.user_email,
@@ -2257,6 +2271,8 @@ pub async fn trash(state: State<'_, AppState>) -> R<Vec<UiProfile>> {
             }),
             permissions: all_permissions(),
             blocklists: Vec::new(),
+            notes: String::new(),
+            start_urls: Vec::new(),
             lock: None,
             running: false,
             // Carries the deletion time, not the last launch: in the trash the
@@ -2690,6 +2706,20 @@ pub async fn delete_blocklist(name: String) -> R<serde_json::Value> {
     Ok(crate::agent::call("blocklists.delete", serde_json::json!({ "name": name })).await?)
 }
 
+/// A new fingerprint seed. Local profiles only: a team profile's seed lives on
+/// the server, which never exposes it, and changing it there is its own
+/// decision with its own audit line — not built yet.
+#[tauri::command]
+pub async fn reseed_profile(state: State<'_, AppState>, id: String, origin: Option<String>) -> R<serde_json::Value> {
+    if origin.as_deref() == Some("team") || (origin.is_none() && mode_of(&state) != "local") {
+        return Err(ApiErr::coded(
+            "err.reseedTeam",
+            "A team profile's fingerprint is kept on the server and cannot be changed from here yet.",
+        ));
+    }
+    Ok(crate::agent::call("profiles.reseed", serde_json::json!({ "id": id })).await?)
+}
+
 /// Write the server kit out to a directory the operator picks.
 ///
 /// The other half of the self-hosting instructions. They said "from a clone of
@@ -2981,6 +3011,8 @@ pub async fn shared_with_me(state: State<'_, AppState>) -> R<Vec<UiProfile>> {
                 .map(perm_name)
                 .collect(),
             blocklists: Vec::new(),
+            notes: String::new(),
+            start_urls: Vec::new(),
             lock: None,
             running: false,
             last_opened_at: None,

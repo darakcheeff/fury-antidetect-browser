@@ -1509,3 +1509,19 @@ ol.steps li .hint { grid-column: 3; margin-top: 0; }
 ol.steps li.ok .stepMark { color: var(--ok); }
 ol.steps li.bad .stepMark { color: var(--accent); }
 ol.steps .stepName { color: var(--text-dim); }
+
+/* The platform badge before a profile's name: two letters on the platform's
+   hue. Small and square so a column of them reads as a column. */
+.platform {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-right: var(--s-2);
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  vertical-align: middle;
+  flex: none;
+}

@@ -83,10 +83,14 @@ pub struct LocalProfile {
     #[serde(default)]
     pub project_name: Option<String>,
     pub name: String,
+    #[serde(default)]
+    pub notes: String,
     pub tags: Vec<String>,
     pub persona_id: String,
     pub fp_seed: i64,
     pub proxy: Option<LocalProxy>,
+    #[serde(default)]
+    pub start_urls: Vec<String>,
     /// Absent from the trash listing, where nothing is running by definition.
     /// Declared as a plain `bool` at first, and a missing plain field is a hard
     /// serde error — so every trash response failed to parse and the view

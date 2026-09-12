@@ -4,6 +4,7 @@
 import { useI18n } from "../i18n";
 import { Icon, IconButton } from "./Icon";
 import type { Me, Profile } from "../api";
+import { platformOf } from "../platform";
 
 /** Every row's controls follow the permissions the SERVER resolved. Hiding a
  *  button is presentation, not protection — the server refuses regardless — but
@@ -138,6 +139,22 @@ export function ProfileTable({
               </td>
               <td>
                 <div className="name">
+                  {/* Where the profile opens, as a two-letter badge in the
+                      platform's colour, so a list of forty scans by platform.
+                      Derived from the start URLs, never fetched: see
+                      platform.ts for why a favicon request would be a leak. */}
+                  {(() => {
+                    const pl = platformOf(p.start_urls);
+                    return pl ? (
+                      <span
+                        className="platform"
+                        title={pl.name}
+                        style={{ background: `hsl(${pl.hue} 45% 30%)`, color: `hsl(${pl.hue} 80% 88%)` }}
+                      >
+                        {pl.mark}
+                      </span>
+                    ) : null;
+                  })()}
                   {p.name}
                   {/* Only the local ones are marked, and only when the list is
                       mixed. Connected to a server, every row without this badge

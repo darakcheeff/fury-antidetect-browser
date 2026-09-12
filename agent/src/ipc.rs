@@ -949,6 +949,20 @@ impl Agent {
             // a normal household; the operator can reassign afterwards, and
             // silently leaving the copy with no proxy would produce a profile
             // that refuses to launch for a reason nobody wrote down.
+            // A different fingerprint for the same profile. Everything a site
+            // has tied to the old one — canvas hash, audio hash, geometry —
+            // stops matching, which is the point, and also why this is refused
+            // while the browser is open: half a session on each seed is the
+            // one thing worse than either.
+            "profiles.reseed" => {
+                let id = str_param(&params, "id")?;
+                if self.running.lock().await.contains_key(&id) {
+                    anyhow::bail!("close the profile first — a fingerprint must not change mid-session");
+                }
+                let seed = self.store.reseed_profile(&id).await?;
+                Ok(json!({ "id": id, "fp_seed": seed }))
+            }
+
             "profiles.clone" => {
                 let id = str_param(&params, "id")?;
                 let source = self
