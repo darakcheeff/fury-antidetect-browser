@@ -22,6 +22,43 @@ export function Proxies({ profiles }: { profiles: Profile[] }) {
   const [editing, setEditing] = useState<LocalProxy | null | undefined>(undefined);
   const [pasting, setPasting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Checking every proxy at once (5.7): per-row outcome, and how far along.
+  const [checks, setChecks] = useState<Map<string, { ok: boolean; ms?: number; error?: string }>>(new Map());
+  const [checking, setChecking] = useState<{ done: number; total: number } | null>(null);
+
+  /** The URL the single-proxy form would build. In team mode the password is
+   *  not here, and check_proxy fetches it by id instead. */
+  const urlOf = (p: LocalProxy) => {
+    const auth = p.username ? `${encodeURIComponent(p.username)}:${encodeURIComponent(p.password ?? "")}@` : "";
+    return `${p.kind}://${auth}${p.host}:${p.port}`;
+  };
+
+  const checkAll = async () => {
+    const list = rows;
+    setChecks(new Map());
+    setChecking({ done: 0, total: list.length });
+    let done = 0;
+    // Three at a time: the checker is a third party, and forty simultaneous
+    // requests from one address is how a checker starts refusing.
+    const queue = [...list];
+    const worker = async () => {
+      for (;;) {
+        const p = queue.shift();
+        if (!p) return;
+        try {
+          const r = await api.checkProxy(urlOf(p), p.checker_url, p.id);
+          setChecks((m) => new Map(m).set(p.id, { ok: r.ok, ms: r.ms, error: r.ok ? undefined : r.error }));
+        } catch (e) {
+          setChecks((m) => new Map(m).set(p.id, { ok: false, error: say(e) }));
+        }
+        done++;
+        setChecking({ done, total: list.length });
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+    setChecking(null);
+    await load();
+  };
 
   const load = useCallback(async () => {
     try {
@@ -46,6 +83,16 @@ export function Proxies({ profiles }: { profiles: Profile[] }) {
           {t("px.newOne")}
         </button>
         <button onClick={() => setPasting(true)}>{t("pp.paste")}</button>
+        {rows.length > 0 && (
+          <button className="ghost" disabled={checking !== null} onClick={() => void checkAll()}>
+            {checking ? t("px.checkingN", { done: checking.done, total: checking.total }) : t("px.checkAll", { n: rows.length })}
+          </button>
+        )}
+        {!checking && checks.size > 0 && (
+          <span className="muted small">
+            {t("px.checkSummary", { ok: [...checks.values()].filter((c) => c.ok).length, bad: [...checks.values()].filter((c) => !c.ok).length })}
+          </span>
+        )}
         <div className="spacer" />
         <button className="ghost" onClick={() => void load()}>
           {t("bar.refresh")}
@@ -82,6 +129,15 @@ export function Proxies({ profiles }: { profiles: Profile[] }) {
                   <td className="muted small">
                     {p.last_ip ?? "—"}
                     {p.last_country ? ` · ${p.last_country}` : ""}
+                    {(() => {
+                      const c = checks.get(p.id);
+                      if (!c) return null;
+                      return c.ok ? (
+                        <div className="ok">{t("px.checkOk", { ms: c.ms ?? 0 })}</div>
+                      ) : (
+                        <div className="warn" title={c.error}>{t("px.checkBad")}</div>
+                      );
+                    })()}
                   </td>
                   <td className="muted">
                     {usedBy(p.id) === 0 ? "—" : t("px.usedByN", { n: usedBy(p.id) })}

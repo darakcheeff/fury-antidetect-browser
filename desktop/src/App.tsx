@@ -24,6 +24,7 @@ import { Signup } from "./components/Signup";
 import { Settings } from "./components/Settings";
 import { Sidebar, type View } from "./components/Sidebar";
 import { ShareDialog } from "./components/ShareDialog";
+import { CsvImport } from "./components/CsvImport";
 import { IconButton } from "./components/Icon";
 import { useTheme } from "./theme";
 import { exitSharing } from "./consistency";
@@ -65,6 +66,7 @@ export function App() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   /** `undefined` closed, `null` making new ones, a profile means copying it. */
   const [bulk, setBulk] = useState<Profile | null | undefined>(undefined);
+  const [csv, setCsv] = useState(false);
   const [cookiesFor, setCookiesFor] = useState<Profile | null>(null);
   const [extFor, setExtFor] = useState<Profile | null>(null);
   const [netFor, setNetFor] = useState<Profile | null>(null);
@@ -859,6 +861,9 @@ export function App() {
                 the one people reach for after the first few profiles, and it
                 acts on the project this toolbar is already filtering. */}
             <button onClick={() => setBulk(null)}>{t("bp.title")}</button>
+            {/* Local mode only: a team profile's proxy carries sealed
+                credentials on the server — see CsvImport. */}
+            {local && <button className="ghost" onClick={() => setCsv(true)}>{t("csv.button")}</button>}
             <input
               className="search"
               placeholder={t("bar.search")}
@@ -1093,6 +1098,71 @@ export function App() {
                   </select>
                   );
                 })()}
+                {/* Proxy for the whole selection (5.7). Offered when every
+                    chosen row is on the side the proxy list describes: the
+                    list is this machine's in local mode and the server's
+                    otherwise, and a local profile cannot point at a server
+                    proxy. "Each its own" hands out proxies nobody uses yet,
+                    one per profile — the answer to the household warning in
+                    the proxy column. */}
+                {(() => {
+                  const side = local ? "local" : "team";
+                  if (!proxyList || proxyList.length === 0 || !chosen.every((p) => p.origin === side)) return null;
+                  const used = new Set(profiles.map((p) => p.proxy?.id).filter(Boolean));
+                  const free = proxyList.filter((x) => !used.has(x.id));
+                  const assign = async (pairs: [Profile, string | null][]) => {
+                    setBusy(true);
+                    setError(null);
+                    let failed = 0;
+                    for (const [p, id] of pairs) {
+                      try {
+                        // The agent takes the id and refuses a partial proxy
+                        // object; the server path reads `proxy.id`. Each side
+                        // gets the shape it reads.
+                        await api.saveProfile(
+                          local ? { ...p, proxy_id: id ?? "", proxy: null } : { ...p, proxy: id ? { id } : null },
+                          p.origin,
+                        );
+                      } catch {
+                        failed++;
+                      }
+                    }
+                    setSelected(new Set());
+                    await refreshProfiles();
+                    setBusy(false);
+                    setNotice({ text: failed > 0 ? t("bar.proxySetFailed", { n: pairs.length - failed, f: failed }) : t("bar.proxySet", { n: pairs.length }), forProfile: null });
+                  };
+                  return (
+                    <select
+                      style={{ width: "auto" }}
+                      value=""
+                      disabled={busy}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (v === "") return;
+                        if (v === "\u0000each") {
+                          void assign(chosen.map((p, i) => [p, free[i].id] as [Profile, string]));
+                        } else if (v === "\u0000none") {
+                          void assign(chosen.map((p) => [p, null] as [Profile, null]));
+                        } else {
+                          void assign(chosen.map((p) => [p, v] as [Profile, string]));
+                        }
+                      }}
+                    >
+                      <option value="">{t("bar.proxyTo")}</option>
+                      <option value={"\u0000each"} disabled={free.length < chosen.length}>
+                        {t("bar.proxyEach", { n: free.length })}
+                      </option>
+                      {proxyList.map((x) => (
+                        <option key={x.id} value={x.id}>
+                          {x.name} · {x.last_country ?? x.host}{used.has(x.id) ? ` · ${t("px.usedByN", { n: profiles.filter((p) => p.proxy?.id === x.id).length })}` : ""}
+                        </option>
+                      ))}
+                      {/* A team profile must have a proxy: the server refuses one without. */}
+                      {local && <option value={"\u0000none"}>{t("bar.proxyNone")}</option>}
+                    </select>
+                  );
+                })()}
                 {/* One profile, not many. Copying acts on a single source and
                     cookies belong to a single jar, so offering either for a
                     multi-selection would mean guessing which one was meant. */}
@@ -1320,6 +1390,13 @@ export function App() {
               await load();
               await refreshProfiles();
             }}
+          />
+        )}
+        {csv && (
+          <CsvImport
+            projectId={active?.origin === "local" ? active.id : null}
+            onDone={() => void refreshProfiles()}
+            onClose={() => setCsv(false)}
           />
         )}
 
