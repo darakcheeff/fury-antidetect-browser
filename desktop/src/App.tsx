@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "./i18n";
-import { api, ApiError, type Me, type MirrorStatus, type Profile, type Project, type Shell } from "./api";
+import { api, ApiError, type Me, type MirrorStatus, type Profile, type Project, type Shell, type WarmProgress } from "./api";
 import { Login } from "./components/Login";
 import { ProfileDialog } from "./components/ProfileDialog";
 import { BulkProfiles } from "./components/BulkProfiles";
@@ -11,6 +11,7 @@ import { Cookies } from "./components/Cookies";
 import { Extensions } from "./components/Extensions";
 import { NetworkReport } from "./components/NetworkReport";
 import { ExtensionsView } from "./components/ExtensionsView";
+import { WarmDialog } from "./components/WarmDialog";
 import { useAsk } from "./components/Ask";
 import { CommandPalette, type Command } from "./components/CommandPalette";
 import { ProfileTable, isOpenHere } from "./components/ProfileTable";
@@ -62,6 +63,27 @@ export function App() {
   // membership stay true to the agent rather than to the click that started it.
   const [mirror, setMirror] = useState<MirrorStatus | null>(null);
   const [mirrorNote, setMirrorNote] = useState<string | null>(null);
+  // Warm-ups in progress, polled while any runs.
+  const [warmFor, setWarmFor] = useState<Profile[] | null>(null);
+  const [warm, setWarm] = useState<WarmProgress[]>([]);
+  useEffect(() => {
+    if (!shell?.agent_ready) return;
+    let stop = false;
+    const tick = async () => {
+      try {
+        const s = await api.warmStatus();
+        if (!stop) setWarm(s);
+      } catch {
+        if (!stop) setWarm([]);
+      }
+    };
+    void tick();
+    const h = setInterval(() => void tick(), 3000);
+    return () => {
+      stop = true;
+      clearInterval(h);
+    };
+  }, [shell?.agent_ready]);
   useEffect(() => {
     if (!shell?.agent_ready) return;
     let stop = false;
@@ -651,6 +673,35 @@ export function App() {
           </div>
         )}
 
+        {warm.length > 0 && (
+          <div className="notice" role="status" style={{ display: "block" }}>
+            {warm.map((w) => (
+              <div key={w.profile_id} className="row" style={{ flexWrap: "wrap", marginBottom: "var(--s-1)" }}>
+                <strong>{w.name}</strong>
+                <span className="muted small">
+                  {w.finished
+                    ? w.error
+                      ? t("warm.failed", { err: w.error })
+                      : w.stopped
+                        ? t("warm.stoppedAt", { done: w.done, total: w.total })
+                        : t("warm.doneAll", { total: w.total })
+                    : t("warm.progress", { done: w.done, total: w.total })}
+                  {" · "}
+                  {t("warm.cookies", { before: w.cookies_before, now: w.cookies_now })}
+                </span>
+                {w.current && <span className="mono small muted" style={{ maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{w.current}</span>}
+                <div className="spacer" />
+                {!w.finished && (
+                  <button className="ghost" onClick={() => void api.warmStop(w.profile_id)}>{t("mir.stop")}</button>
+                )}
+              </div>
+            ))}
+            {warm.every((w) => w.finished) && (
+              <button className="linky" onClick={async () => { await api.warmClear(); setWarm([]); }}>{t("warm.dismiss")}</button>
+            )}
+          </div>
+        )}
+
         {(mirror || mirrorNote) && (
           <div className="notice" role="status" style={{ display: "block" }}>
             {mirror && (
@@ -1014,6 +1065,11 @@ export function App() {
                 {/* One profile, not many. Copying acts on a single source and
                     cookies belong to a single jar, so offering either for a
                     multi-selection would mean guessing which one was meant. */}
+                {chosen.length >= 1 && local && (
+                  <button disabled={busy} title={t("warm.why")} onClick={() => setWarmFor(chosen)}>
+                    {t("warm.button", { n: chosen.length })}
+                  </button>
+                )}
                 {chosen.length >= 2 && local && (
                   <button
                     className="primary"
@@ -1235,6 +1291,16 @@ export function App() {
 
         {cookiesFor && (
           <Cookies profile={cookiesFor} onClose={() => setCookiesFor(null)} />
+        )}
+        {warmFor && (
+          <WarmDialog
+            profiles={warmFor}
+            onStarted={(note) => {
+              setMirrorNote(note);
+              void refreshProfiles();
+            }}
+            onClose={() => setWarmFor(null)}
+          />
         )}
         {netFor && netFor.proxy && (
           <NetworkReport proxy={netFor.proxy} onClose={() => setNetFor(null)} />

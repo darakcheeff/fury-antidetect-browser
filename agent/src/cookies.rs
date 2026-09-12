@@ -73,9 +73,23 @@ impl Cdp {
         method: &str,
         params: serde_json::Value,
     ) -> anyhow::Result<serde_json::Value> {
+        self.call_in(None, method, params).await
+    }
+
+    /// The same, inside a page session obtained from `Target.attachToTarget`
+    /// with `flatten: true`. Browser-level commands take `None`.
+    pub async fn call_in(
+        &mut self,
+        session: Option<&str>,
+        method: &str,
+        params: serde_json::Value,
+    ) -> anyhow::Result<serde_json::Value> {
         let id = self.next_id;
         self.next_id += 1;
-        let request = serde_json::json!({ "id": id, "method": method, "params": params });
+        let mut request = serde_json::json!({ "id": id, "method": method, "params": params });
+        if let Some(s) = session {
+            request["sessionId"] = serde_json::json!(s);
+        }
         self.socket.send(Message::Text(request.to_string())).await?;
 
         loop {

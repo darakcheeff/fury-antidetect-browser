@@ -92,6 +92,12 @@ pub struct Agent {
     core_download: crate::core_download::Shared,
     /// The synchronised-windows group, empty when none is running. See mirror.rs.
     mirror: Arc<crate::mirror::Hub>,
+    /// Profiles being warmed — visiting a list of sites. See warm.rs.
+    warmer: Arc<crate::warm::Warmer>,
+    /// A handle back to the Arc this agent lives in, for background work
+    /// that outlives the IPC call that started it — a warm-up closing its
+    /// browser through `stop`, so a team profile still pushes its bundle.
+    me: std::sync::OnceLock<std::sync::Weak<Agent>>,
 }
 
 /// What the exit checker can tell us about where a proxy comes out.
@@ -190,13 +196,17 @@ impl Agent {
             }
         }
 
-        Ok(Arc::new(Self {
+        let agent = Arc::new(Self {
             store,
             running: Mutex::new(HashMap::new()),
             core: crate::core_binary(),
             core_download: Default::default(),
             mirror: crate::mirror::Hub::new(),
-        }))
+            warmer: crate::warm::Warmer::new(),
+            me: std::sync::OnceLock::new(),
+        });
+        let _ = agent.me.set(Arc::downgrade(&agent));
+        Ok(agent)
     }
 
     /// Notice browsers the operator closed from their own window.
@@ -1080,6 +1090,76 @@ impl Agent {
                 }
                 Ok(json!({ "joined": joined, "refused": refused, "status": self.mirror.status().await }))
             }
+
+            // Warming: visit a list of sites in a profile so it has been
+            // somewhere. See warm.rs for what it does and does not do.
+            "warm.start" => {
+                let ids: Vec<String> = params
+                    .get("profile_ids")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                    .unwrap_or_default();
+                let plan: crate::warm::Plan = serde_json::from_value(
+                    params.get("plan").cloned().unwrap_or(serde_json::Value::Null),
+                )
+                .map_err(|e| anyhow::anyhow!("plan: {e}"))?;
+                let mut started = Vec::new();
+                let mut refused = Vec::new();
+                for id in ids {
+                    let open_without_cdp = {
+                        let running = self.running.lock().await;
+                        running.get(&id).map(|r| r.ws_endpoint.is_none()).unwrap_or(false)
+                    };
+                    if open_without_cdp {
+                        refused.push(json!({ "id": id, "reason": "open_without_cdp" }));
+                        continue;
+                    }
+                    let is_running = self.running.lock().await.contains_key(&id);
+                    if !is_running {
+                        if let Err(e) = self.launch(&id, None, None, None, None, true).await {
+                            refused.push(json!({ "id": id, "reason": e.to_string() }));
+                            continue;
+                        }
+                    }
+                    let ws = self.running.lock().await.get(&id).and_then(|r| r.ws_endpoint.clone());
+                    let name = self.store.profiles(None).await?.into_iter().find(|p| p.id == id).map(|p| p.name).unwrap_or_else(|| id.clone());
+                    let Some(ws) = ws else {
+                        refused.push(json!({ "id": id, "reason": "no debugging port after launch" }));
+                        continue;
+                    };
+                    // Closing afterwards goes through the same path the
+                    // Close button takes, so a team profile still pushes its
+                    // bundle — the cookies it just collected are the point.
+                    let agent = self.me.get().and_then(|w| w.upgrade());
+                    let pid = id.clone();
+                    let r = self.warmer.start(&id, &name, &ws, plan.clone(), move |close| {
+                        Box::pin(async move {
+                            if let (true, Some(agent)) = (close, agent) {
+                                let _ = agent.stop(&pid).await;
+                            }
+                        })
+                    }).await;
+                    match r {
+                        Ok(()) => started.push(id),
+                        Err(e) => refused.push(json!({ "id": id, "reason": e.to_string() })),
+                    }
+                }
+                Ok(json!({ "started": started, "refused": refused }))
+            }
+
+            "warm.status" => Ok(serde_json::to_value(self.warmer.status().await)?),
+
+            "warm.stop" => {
+                let id = str_param(&params, "id")?;
+                Ok(json!({ "stopping": self.warmer.stop(&id).await }))
+            }
+
+            "warm.clear" => {
+                self.warmer.clear_finished().await;
+                Ok(json!({ "cleared": true }))
+            }
+
+            "warm.defaults" => Ok(json!({ "urls": crate::warm::DEFAULT_URLS })),
 
             "mirror.stop" => {
                 self.mirror.stop().await;

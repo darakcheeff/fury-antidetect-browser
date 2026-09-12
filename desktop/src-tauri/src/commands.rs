@@ -2918,6 +2918,29 @@ pub async fn mirror_typing(on: bool) -> R<serde_json::Value> {
     Ok(crate::agent::call("mirror.typing", serde_json::json!({ "on": on })).await?)
 }
 
+// ---- warming -----------------------------------------------------------------
+
+#[tauri::command]
+pub async fn warm_start(profile_ids: Vec<String>, plan: serde_json::Value) -> R<serde_json::Value> {
+    Ok(crate::agent::call("warm.start", serde_json::json!({ "profile_ids": profile_ids, "plan": plan })).await?)
+}
+#[tauri::command]
+pub async fn warm_status() -> R<serde_json::Value> {
+    Ok(crate::agent::call("warm.status", serde_json::json!({})).await?)
+}
+#[tauri::command]
+pub async fn warm_stop(id: String) -> R<serde_json::Value> {
+    Ok(crate::agent::call("warm.stop", serde_json::json!({ "id": id })).await?)
+}
+#[tauri::command]
+pub async fn warm_clear() -> R<serde_json::Value> {
+    Ok(crate::agent::call("warm.clear", serde_json::json!({})).await?)
+}
+#[tauri::command]
+pub async fn warm_defaults() -> R<serde_json::Value> {
+    Ok(crate::agent::call("warm.defaults", serde_json::json!({})).await?)
+}
+
 /// Write the server kit out to a directory the operator picks.
 ///
 /// The other half of the self-hosting instructions. They said "from a clone of

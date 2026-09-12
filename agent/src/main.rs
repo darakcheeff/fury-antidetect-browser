@@ -35,6 +35,7 @@ mod tmp;
 mod transfer;
 mod usage;
 mod vault;
+mod warm;
 mod widevine;
 mod wg_stack;
 mod wg_tunnel;

@@ -167,6 +167,27 @@ export interface SessionRow {
   current: boolean;
 }
 
+export interface WarmPlan {
+  urls: string[];
+  dwell_seconds: [number, number];
+  follow_link: boolean;
+  close_after: boolean;
+}
+
+export interface WarmProgress {
+  profile_id: string;
+  name: string;
+  total: number;
+  done: number;
+  current: string | null;
+  cookies_before: number;
+  cookies_now: number;
+  finished: boolean;
+  stopped: boolean;
+  error: string | null;
+  started_at_ms: number;
+}
+
 export interface MirrorStatus {
   active: boolean;
   typing: boolean;
@@ -836,6 +857,15 @@ export const api = {
   mirrorStop: (): Promise<unknown> => cmd("mirror_stop"),
   mirrorStatus: (): Promise<MirrorStatus> => cmd<MirrorStatus>("mirror_status"),
   mirrorTyping: (on: boolean): Promise<unknown> => cmd("mirror_typing", { on }),
+
+  // ---- warming ------------------------------------------------------------
+
+  warmStart: (profileIds: string[], plan: WarmPlan): Promise<{ started: string[]; refused: { id: string; reason: string }[] }> =>
+    cmd("warm_start", { profileIds, plan }),
+  warmStatus: (): Promise<WarmProgress[]> => cmd<WarmProgress[]>("warm_status"),
+  warmStop: (id: string): Promise<unknown> => cmd("warm_stop", { id }),
+  warmClear: (): Promise<unknown> => cmd("warm_clear"),
+  warmDefaults: (): Promise<{ urls: string[] }> => cmd("warm_defaults"),
 
   // ---- this machine as a persona ----------------------------------------
 
