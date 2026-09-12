@@ -1492,6 +1492,9 @@ async fn launch_from_spec(state: &AppState, grant: &LockGrant) -> R<serde_json::
         "timezone": spec.timezone,
         "languages": spec.languages,
         "start_urls": spec.start_urls,
+        // The organisation's domain lists this grant applies. Text, not
+        // names: the agent has no copy of a team list and must not need one.
+        "inline_lists": spec.domain_lists,
         "last_opened_at": null,
     });
 
@@ -1750,6 +1753,10 @@ pub async fn grant_access(
     project_id: String,
     user_id: String,
     permissions: Vec<String>,
+    // The organisation's domain lists to apply to this grant. `None` keeps
+    // what the grant already carries, so the "let them in" button does not
+    // strip lists an owner set on purpose.
+    domain_lists: Option<Vec<String>>,
 ) -> R<serde_json::Value> {
     state
         .call(
@@ -1759,10 +1766,26 @@ pub async fn grant_access(
                 "user_id": user_id,
                 "permissions": permissions,
                 "expires_at": serde_json::Value::Null,
+                "domain_lists": domain_lists,
             })),
             true,
         )
         .await
+}
+
+// ---- the organisation's domain lists --------------------------------------
+
+#[tauri::command]
+pub async fn org_domain_lists(state: State<'_, AppState>) -> R<serde_json::Value> {
+    state.call(reqwest::Method::GET, "/v1/org/domain-lists", Body::None, true).await
+}
+#[tauri::command]
+pub async fn save_org_domain_list(state: State<'_, AppState>, id: Option<String>, name: String, body: String) -> R<serde_json::Value> {
+    state.call(reqwest::Method::POST, "/v1/org/domain-lists", Body::Json(serde_json::json!({ "id": id, "name": name, "body": body })), true).await
+}
+#[tauri::command]
+pub async fn delete_org_domain_list(state: State<'_, AppState>, id: String) -> R<serde_json::Value> {
+    state.call(reqwest::Method::DELETE, &format!("/v1/org/domain-lists/{id}"), Body::None, true).await
 }
 
 #[tauri::command]

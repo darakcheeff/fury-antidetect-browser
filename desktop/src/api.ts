@@ -188,6 +188,15 @@ export interface WarmProgress {
   started_at_ms: number;
 }
 
+export interface OrgDomainList {
+  id: string;
+  name: string;
+  body: string;
+  updated_at: string;
+  domains: number;
+  allow_only: boolean;
+}
+
 export interface MirrorStatus {
   active: boolean;
   typing: boolean;
@@ -657,12 +666,20 @@ export const api = {
     cmd("hand_over_key", { userId, publicKey }),
 
   grants: (projectId: string): Promise<{
-    granted: { user_id: string; email: string; role: string; permissions: Perm[] }[];
+    granted: { user_id: string; email: string; role: string; permissions: Perm[]; domain_lists?: string[] }[];
     implicit: { user_id: string; email: string; role: string }[];
   }> => cmd("grants", { projectId }),
 
-  grantAccess: (projectId: string, userId: string, permissions: Perm[]): Promise<unknown> =>
-    cmd("grant_access", { projectId, userId, permissions }),
+  /** `domainLists` undefined keeps what the grant already carries. */
+  grantAccess: (projectId: string, userId: string, permissions: Perm[], domainLists?: string[]): Promise<unknown> =>
+    cmd("grant_access", { projectId, userId, permissions, domainLists: domainLists ?? null }),
+
+  /** The organisation's domain lists — readable by every member, written by
+   *  owners and admins, attached to grants. */
+  orgDomainLists: (): Promise<OrgDomainList[]> => cmd<OrgDomainList[]>("org_domain_lists"),
+  saveOrgDomainList: (id: string | null, name: string, body: string): Promise<{ id: string; domains: number }> =>
+    cmd("save_org_domain_list", { id, name, body }),
+  deleteOrgDomainList: (id: string): Promise<unknown> => cmd("delete_org_domain_list", { id }),
 
   revokeAccess: (projectId: string, userId: string): Promise<unknown> =>
     cmd("revoke_access", { projectId, userId }),

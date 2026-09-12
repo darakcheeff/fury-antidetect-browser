@@ -142,6 +142,17 @@ pub struct LaunchSpec {
     pub languages: Option<Vec<String>>,
     pub start_urls: Vec<String>,
     pub proxy: SealedProxy,
+    /// The organisation's domain lists this caller's grant applies to the
+    /// launch — as text, parsed by the agent with its own blocklist code.
+    /// Empty for owners and admins, who have no grant.
+    #[serde(default)]
+    pub domain_lists: Vec<DomainListText>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DomainListText {
+    pub name: String,
+    pub body: String,
 }
 
 /// A proxy as the server holds it: addressable, and unreadable.
@@ -264,6 +275,10 @@ pub struct GrantRequest {
     pub user_id: Uuid,
     pub permissions: Vec<Perm>,
     pub expires_at: Option<String>,
+    /// Organisation domain lists to apply to this person's launches in the
+    /// project. Absent keeps what the grant already carries.
+    #[serde(default)]
+    pub domain_lists: Option<Vec<Uuid>>,
 }
 
 // ---------------------------------------------------------------------------

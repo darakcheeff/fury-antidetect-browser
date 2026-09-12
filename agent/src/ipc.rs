@@ -1841,7 +1841,16 @@ impl Agent {
         // The profile's lists, unioned. Read at launch rather than held in
         // memory: a list edited between launches should take effect on the
         // next one without anything having to notice it changed.
-        let blocked = std::sync::Arc::new(load_blocklists(&profile.blocklists));
+        let blocked = {
+            let mut all = load_blocklists(&profile.blocklists);
+            // The organisation's lists, by grant. Same parser, same merge rule
+            // — a whitelist among them narrows, a blocklist subtracts — and
+            // nothing the operator's own machine holds can loosen them.
+            for l in &profile.inline_lists {
+                all.merge(crate::blocklist::Blocklist::parse(&l.body));
+            }
+            std::sync::Arc::new(all)
+        };
         let relay = crate::relay::Relay::new(upstream).blocking(blocked);
         let start_page = relay.start_url();
         let (relay_port, relay_task) = relay.serve(0).await?;

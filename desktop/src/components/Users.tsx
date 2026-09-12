@@ -6,6 +6,8 @@ import { api, type Perm, type Project } from "../api";
 import { useI18n } from "../i18n";
 import { Audit } from "./Audit";
 import { Security } from "./Security";
+import { TeamDomainLists } from "./TeamDomainLists";
+import type { OrgDomainList } from "../api";
 import { useAsk } from "./Ask";
 
 type Members = Awaited<ReturnType<typeof api.orgMembers>>;
@@ -73,6 +75,12 @@ export function Users({
   const teamProjects = projects.filter((p) => p.origin === "team");
   const [project, setProject] = useState<string>(teamProjects[0]?.id ?? "");
   const [grants, setGrants] = useState<Grants | null>(null);
+  // The organisation's domain lists, for attaching to a grant in the row.
+  const [orgLists, setOrgLists] = useState<OrgDomainList[]>([]);
+  useEffect(() => {
+    if (local) return;
+    void api.orgDomainLists().then(setOrgLists).catch(() => setOrgLists([]));
+  }, [local, team]);
 
   // The list arrives after the first render and changes while the screen is
   // open — a folder created on the server, or the last one deleted. A selection
@@ -281,6 +289,36 @@ export function Users({
                       {t("team.revoke")}
                     </button>
                   )}
+                  {/* Which of the organisation's domain lists this grant
+                      applies. Shown only where there is a grant to attach
+                      them to: owners and admins have none and are not
+                      restricted. */}
+                  {project && granted.has(m.user_id) && orgLists.length > 0 && (() => {
+                    const g = grants?.granted.find((x) => x.user_id === m.user_id);
+                    const attached = new Set(g?.domain_lists ?? []);
+                    return (
+                      <div className="row" style={{ flexWrap: "wrap", gap: "var(--s-2)", marginTop: "var(--s-1)" }}>
+                        <span className="muted small">{t("tdl.applies")}</span>
+                        {orgLists.map((l) => (
+                          <label key={l.id} className="row" style={{ gap: 4 }}>
+                            <input
+                              type="checkbox"
+                              style={{ width: 13, height: 13, accentColor: "var(--accent)" }}
+                              checked={attached.has(l.id)}
+                              disabled={busy}
+                              onChange={(e) => {
+                                const next = new Set(attached);
+                                if (e.target.checked) next.add(l.id);
+                                else next.delete(l.id);
+                                void run(() => api.grantAccess(project, m.user_id, g?.permissions ?? MEMBER_PERMS, [...next]));
+                              }}
+                            />
+                            <span className="small">{l.name}</span>
+                          </label>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
               </td>
             </tr>
@@ -437,6 +475,7 @@ export function Users({
       {(team.members.find((m) => m.is_you)?.role === "owner" ||
         team.members.find((m) => m.is_you)?.role === "admin") && (
         <>
+          <TeamDomainLists canEdit />
           <Security isOwner={team.members.find((m) => m.is_you)?.role === "owner"} />
           <h2 className="sectionTitle" style={{ marginTop: "var(--s-6)" }}>{t("team.audit")}</h2>
           <Audit />

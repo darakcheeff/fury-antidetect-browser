@@ -41,6 +41,8 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/v1/me/totp/setup", post(crate::security::totp_setup))
         .route("/v1/me/totp/confirm", post(crate::security::totp_confirm))
         .route("/v1/org/security", get(crate::security::get_policy).put(crate::security::put_policy))
+        .route("/v1/org/domain-lists", get(list_domain_lists).post(upsert_domain_list))
+        .route("/v1/org/domain-lists/{id}", axum::routing::delete(delete_domain_list))
         .route("/v1/audit/logins", get(crate::security::list_logins))
         .route("/v1/sessions", get(crate::security::list_sessions))
         .route("/v1/sessions/{id}", axum::routing::delete(crate::security::revoke_session))
@@ -1263,26 +1265,140 @@ async fn grant_access(
     // same shape this API hands out — and Postgres will not coerce text into a
     // timestamptz in a parameter position. Without the cast every grant failed
     // with a 500, which is to say access could not be given to anybody at all.
+    // Domain lists: the organisation's, by id, and only ones that exist in
+    // this organisation — a foreign id would be a list nobody here can read.
+    let lists: Option<Vec<Uuid>> = match &req.domain_lists {
+        None => None,
+        Some(ids) if ids.is_empty() => Some(Vec::new()),
+        Some(ids) => {
+            let known: Vec<(Uuid,)> = sqlx::query_as(
+                "SELECT id FROM org_domain_lists WHERE org_id = $1 AND id = ANY($2)",
+            )
+            .bind(caller.org_id)
+            .bind(ids)
+            .fetch_all(db.as_mut())
+            .await?;
+            if known.len() != ids.len() {
+                return Err(ApiError::BadRequest("one of the domain lists does not exist in this organisation".into()));
+            }
+            Some(known.into_iter().map(|(id,)| id).collect())
+        }
+    };
     sqlx::query(
-        "INSERT INTO project_grants (project_id, user_id, permissions, granted_by, expires_at) \
-         VALUES ($1, $2, $3, $4, $5::timestamptz) \
+        "INSERT INTO project_grants (project_id, user_id, permissions, granted_by, expires_at, domain_lists) \
+         VALUES ($1, $2, $3, $4, $5::timestamptz, COALESCE($6, '{}')) \
          ON CONFLICT (project_id, user_id) DO UPDATE \
          SET permissions = EXCLUDED.permissions, granted_by = EXCLUDED.granted_by, \
-             granted_at = now(), expires_at = EXCLUDED.expires_at",
+             granted_at = now(), expires_at = EXCLUDED.expires_at, \
+             domain_lists = COALESCE($6, project_grants.domain_lists)",
     )
     .bind(project_id)
     .bind(req.user_id)
     .bind(capped.0)
     .bind(caller.user_id)
     .bind(req.expires_at.as_deref())
+    .bind(lists.as_deref())
     .execute(db.as_mut())
     .await?;
 
     audit(db.as_mut(), &caller, "access.grant", Some(project_id),
-          json!({ "target": req.user_id, "requested": requested.to_vec(), "granted": capped.to_vec() }))
+          json!({ "target": req.user_id, "requested": requested.to_vec(), "granted": capped.to_vec(), "domain_lists": req.domain_lists }))
         .await?;
 
     Ok(Json(json!({ "granted": capped.to_vec() })))
+}
+
+// ---- the organisation's domain lists ---------------------------------------
+
+#[derive(Deserialize)]
+struct DomainListUpsert {
+    #[serde(default)]
+    id: Option<Uuid>,
+    name: String,
+    body: String,
+}
+
+/// `GET /v1/org/domain-lists` — everyone in the organisation may read them:
+/// a member sees which lists apply to them. Writing needs manage_access.
+async fn list_domain_lists(mut db: auth::Db) -> ApiResult<Json<serde_json::Value>> {
+    let caller = db.caller;
+    let rows: Vec<(Uuid, String, String, String)> = sqlx::query_as(&format!(
+        "SELECT id, name, body, {} FROM org_domain_lists WHERE org_id = $1 ORDER BY name",
+        rfc3339("updated_at")
+    ))
+    .bind(caller.org_id)
+    .fetch_all(db.as_mut())
+    .await?;
+    Ok(Json(json!(rows
+        .into_iter()
+        .map(|(id, name, body, updated_at)| {
+            let parsed = fury_shared::domains::summarise(&body);
+            json!({ "id": id, "name": name, "body": body, "updated_at": updated_at,
+                    "domains": parsed.0, "allow_only": parsed.1 })
+        })
+        .collect::<Vec<_>>())))
+}
+
+async fn upsert_domain_list(mut db: auth::Db, Json(req): Json<DomainListUpsert>) -> ApiResult<Json<serde_json::Value>> {
+    let caller = db.caller;
+    if !matches!(caller.role, fury_shared::rbac::OrgRole::Owner | fury_shared::rbac::OrgRole::Admin) {
+        return Err(ApiError::Denied(Perm::ManageAccess));
+    }
+    let name = req.name.trim();
+    if name.is_empty() || name.len() > 64 {
+        return Err(ApiError::BadRequest("a list needs a name of up to 64 characters".into()));
+    }
+    let (domains, _) = fury_shared::domains::summarise(&req.body);
+    if domains == 0 {
+        return Err(ApiError::BadRequest("the list names no domains — check the format: a hosts file, an Adblock list, or one domain per line".into()));
+    }
+    let id = req.id.unwrap_or_else(Uuid::now_v7);
+    sqlx::query(
+        "INSERT INTO org_domain_lists (id, org_id, name, body, created_by) VALUES ($1, $2, $3, $4, $5) \
+         ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, body = EXCLUDED.body, updated_at = now()",
+    )
+    .bind(id)
+    .bind(caller.org_id)
+    .bind(name)
+    .bind(&req.body)
+    .bind(caller.user_id)
+    .execute(db.as_mut())
+    .await
+    .map_err(|e| match e {
+        sqlx::Error::Database(ref d) if d.is_unique_violation() => ApiError::Conflict(format!("a list named {name:?} already exists")),
+        other => ApiError::Db(other),
+    })?;
+    audit(db.as_mut(), &caller, "domain_list.saved", Some(id), json!({ "name": name, "domains": domains })).await?;
+    Ok(Json(json!({ "id": id, "domains": domains })))
+}
+
+async fn delete_domain_list(mut db: auth::Db, Path(id): Path<Uuid>) -> ApiResult<Json<serde_json::Value>> {
+    let caller = db.caller;
+    if !matches!(caller.role, fury_shared::rbac::OrgRole::Owner | fury_shared::rbac::OrgRole::Admin) {
+        return Err(ApiError::Denied(Perm::ManageAccess));
+    }
+    let n = sqlx::query("DELETE FROM org_domain_lists WHERE id = $1 AND org_id = $2")
+        .bind(id)
+        .bind(caller.org_id)
+        .execute(db.as_mut())
+        .await?
+        .rows_affected();
+    if n == 0 {
+        return Err(ApiError::NotFound);
+    }
+    // Grants that pointed at it keep the id in their array; the launch join
+    // simply finds nothing for it. Cleaned here so the grant screen does not
+    // show a ghost.
+    sqlx::query(
+        "UPDATE project_grants g SET domain_lists = array_remove(g.domain_lists, $1) \
+         FROM projects p WHERE p.id = g.project_id AND p.org_id = $2 AND $1 = ANY(g.domain_lists)",
+    )
+    .bind(id)
+    .bind(caller.org_id)
+    .execute(db.as_mut())
+    .await?;
+    audit(db.as_mut(), &caller, "domain_list.deleted", Some(id), json!({})).await?;
+    Ok(Json(json!({ "deleted": true })))
 }
 
 /// Who can reach this project, and with what.
@@ -1300,9 +1416,9 @@ async fn list_grants(
 
     rbac_guard::require(db.as_mut(), caller.user_id, project_id, Perm::ManageAccess).await?;
 
-    let rows: Vec<(Uuid, String, String, i64, Option<String>)> = sqlx::query_as(
+    let rows: Vec<(Uuid, String, String, i64, Option<String>, Vec<Uuid>)> = sqlx::query_as(
         &format!(
-        "SELECT u.id, u.email, m.role::text, g.permissions, {} \
+        "SELECT u.id, u.email, m.role::text, g.permissions, {}, g.domain_lists \
          FROM project_grants g \
          JOIN users u ON u.id = g.user_id \
          JOIN projects p ON p.id = g.project_id \
@@ -1328,12 +1444,13 @@ async fn list_grants(
     .await?;
 
     Ok(Json(json!({
-        "granted": rows.iter().map(|(id, email, role, perms, expires)| json!({
+        "granted": rows.iter().map(|(id, email, role, perms, expires, lists)| json!({
             "user_id": id,
             "email": email,
             "role": role,
             "permissions": PermSet(*perms).to_vec(),
             "expires_at": expires,
+            "domain_lists": lists,
         })).collect::<Vec<_>>(),
         "implicit": implicit.iter().map(|(id, email, role)| json!({
             "user_id": id, "email": email, "role": role,
@@ -2965,7 +3082,8 @@ async fn acquire_lock(
     // Assembled before the lock is taken. A lock held on a profile that turns
     // out to be unlaunchable is a profile nobody else can open for the next
     // ninety seconds, over a failure that was knowable up front.
-    let spec = launch_spec(db.as_mut(), profile_id).await?;
+    let mut spec = launch_spec(db.as_mut(), profile_id).await?;
+    spec.domain_lists = domain_lists_for(db.as_mut(), caller.user_id, profile_id).await?;
 
     let (raw, digest) = auth::new_token();
 
@@ -3056,6 +3174,28 @@ async fn acquire_lock(
 /// something a launch cannot proceed without. The wording mirrors the agent's
 /// own (`agent/src/ipc.rs`), because an operator should read the same
 /// explanation whether the profile lives on this machine or on a server.
+/// The organisation's domain lists this caller's grant on the profile's
+/// project applies. Owners and admins have no grant row and get none: the
+/// lists are for the people they let in, not for themselves.
+pub(crate) async fn domain_lists_for(
+    db: &mut sqlx::PgConnection,
+    caller: Uuid,
+    profile_id: Uuid,
+) -> ApiResult<Vec<fury_shared::api::DomainListText>> {
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT l.name, l.body FROM project_grants g \
+         JOIN profiles f ON f.project_id = g.project_id \
+         JOIN org_domain_lists l ON l.id = ANY(g.domain_lists) \
+         WHERE f.id = $1 AND g.user_id = $2 \
+         ORDER BY l.name",
+    )
+    .bind(profile_id)
+    .bind(caller)
+    .fetch_all(&mut *db)
+    .await?;
+    Ok(rows.into_iter().map(|(name, body)| fury_shared::api::DomainListText { name, body }).collect())
+}
+
 async fn launch_spec(db: &mut sqlx::PgConnection, profile_id: Uuid) -> ApiResult<fury_shared::api::LaunchSpec> {
     #[derive(sqlx::FromRow)]
     struct Row {
@@ -3130,6 +3270,9 @@ async fn launch_spec(db: &mut sqlx::PgConnection, profile_id: Uuid) -> ApiResult
         timezone,
         languages,
         start_urls: row.start_urls,
+        // Filled in by the caller that knows who is launching; the spec
+        // itself is about the profile.
+        domain_lists: Vec::new(),
         proxy: fury_shared::api::SealedProxy {
             id: px_id,
             kind,

@@ -117,6 +117,12 @@ impl Proxy {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InlineList {
+    pub name: String,
+    pub body: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Profile {
     pub id: String,
     /// `None` when the profile is in no project. The Profiles list is the
@@ -135,6 +141,13 @@ pub struct Profile {
     /// `is_empty` per connection. See `blocklist.rs`.
     #[serde(default)]
     pub blocklists: Vec<String>,
+    /// Lists that arrive with the profile rather than by name: the
+    /// organisation's, attached to the caller's grant and folded into the
+    /// launch spec by the server (docs/16, 5.19). Never stored here — a team
+    /// profile's record lives on the server — and applied on top of
+    /// `blocklists` at launch with the same parser.
+    #[serde(default)]
+    pub inline_lists: Vec<InlineList>,
     pub persona_id: String,
     pub fp_seed: i64,
     /// The proxy in full, for a caller that is READING a profile: the list
@@ -955,6 +968,8 @@ fn row_to_profile(r: sqlx::sqlite::SqliteRow) -> Profile {
         name: r.get("name"),
         notes: r.get("notes"),
         tags: from_json_array(r.get("tags")),
+        // Never in the local database: they arrive with a team launch.
+        inline_lists: Vec::new(),
         // try_get rather than get: a database written before the column
         // existed has no such value, and a profile without a blocklist is the
         // ordinary case rather than a fault.
@@ -1056,6 +1071,7 @@ mod credential_tests {
                 notes: String::new(),
                 tags: vec![],
                 blocklists: Vec::new(),
+                inline_lists: Vec::new(),
                 persona_id: "x".into(),
                 fp_seed: 1,
                 proxy: None,
@@ -1195,6 +1211,7 @@ mod tests {
             notes: String::new(),
             tags: vec![],
             blocklists: Vec::new(),
+            inline_lists: Vec::new(),
             persona_id: "macos-15-m-series-1728x1117".into(),
             fp_seed: 0,
             proxy: None,

@@ -9,6 +9,7 @@
 pub mod totp;
 pub mod api;
 pub mod capture;
+pub mod domains;
 pub mod catalogue;
 pub mod fingerprint;
 pub mod keys;

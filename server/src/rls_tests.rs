@@ -625,3 +625,45 @@ db_test!(the_policy_is_stored_on_the_organisation_and_reads_back_with_defaults, 
     assert!(p.admits(Some("10.2.3.4".parse().unwrap()), fury_shared::rbac::OrgRole::Member));
     assert!(!p.admits(Some("8.8.8.8".parse().unwrap()), fury_shared::rbac::OrgRole::Member));
 });
+
+// ---------------------------------------------------------------------------
+// 0011: the organisation's domain lists ride the grant into the launch spec
+// ---------------------------------------------------------------------------
+
+db_test!(a_members_grant_carries_the_lists_into_the_launch_and_an_owners_does_not, c, {
+    bind(&mut c, USER_A).await;
+    make_project(&mut c, PROJECT_A, ORG_A, USER_A).await;
+    let sql = format!(
+        "INSERT INTO profiles (id, org_id, project_id, name, persona_id, fp_seed, created_by)
+           VALUES ('{SHARED}','{ORG_A}','{PROJECT_A}','p','win11','\\x0101010101010101','{USER_A}');
+         INSERT INTO org_domain_lists (id, org_id, name, body, created_by)
+           VALUES ('dddddddd-0000-0000-0000-000000000001','{ORG_A}','fb-only','@allow-only\nfacebook.com\n','{USER_A}'),
+                  ('dddddddd-0000-0000-0000-000000000002','{ORG_A}','ads','doubleclick.net\n','{USER_A}');"
+    );
+    c.execute(sql.as_str()).await.expect("seed a profile and two lists");
+
+    // A member of A, let into the project with one of the two lists.
+    let member = "cccccccc-0000-0000-0000-00000000000c";
+    let sql = format!(
+        "INSERT INTO users (id, email, password_hash, public_key, wrapped_private_key, kdf_salt)
+           VALUES ('{member}','m@example.com','x','\\x00','\\x00','\\x00');
+         INSERT INTO org_members (org_id, user_id, role, wrapped_ork, ork_generation)
+           VALUES ('{ORG_A}','{member}','member','\\x00',1);
+         INSERT INTO project_grants (project_id, user_id, permissions, granted_by, domain_lists)
+           VALUES ('{PROJECT_A}','{member}',1,'{USER_A}','{{dddddddd-0000-0000-0000-000000000001}}');"
+    );
+    c.execute(sql.as_str()).await.expect("seed a member with a grant");
+
+    let profile = uuid::Uuid::parse_str(SHARED).unwrap();
+    let for_member = crate::api::domain_lists_for(&mut c, uuid::Uuid::parse_str(member).unwrap(), profile).await.unwrap();
+    assert_eq!(for_member.iter().map(|l| l.name.as_str()).collect::<Vec<_>>(), vec!["fb-only"], "exactly the list on the grant");
+    assert!(for_member[0].body.starts_with("@allow-only"));
+
+    let for_owner = crate::api::domain_lists_for(&mut c, uuid::Uuid::parse_str(USER_A).unwrap(), profile).await.unwrap();
+    assert!(for_owner.is_empty(), "owners have no grant and are not restricted");
+
+    // B cannot see A's lists at all.
+    bind(&mut c, USER_B).await;
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM org_domain_lists").fetch_one(&mut c).await.unwrap();
+    assert_eq!(n, 0);
+});
