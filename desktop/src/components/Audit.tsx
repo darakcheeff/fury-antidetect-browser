@@ -25,11 +25,23 @@ export function Audit() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
+  // Filters. An action prefix rather than a fixed list: actions are dotted
+  // (`profile.launch`, `login.new_device`) so a family is a prefix, and a new
+  // action is filterable the day it is written without touching this file.
+  const [action, setAction] = useState("");
+  const [actor, setActor] = useState("");
+  const [since, setSince] = useState("");
+  const [until, setUntil] = useState("");
 
   const load = useCallback(async (before?: number) => {
     setBusy(true);
     try {
-      const page = await api.audit(before);
+      const page = await api.audit(before, {
+        action,
+        actor,
+        since: since ? new Date(since).toISOString() : "",
+        until: until ? new Date(until + "T23:59:59").toISOString() : "",
+      });
       // Fewer than asked for means the end. Asking again would be a request
       // that can only return nothing.
       if (page.length < 200) setDone(true);
@@ -43,11 +55,30 @@ export function Audit() {
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [action, actor, since, until]);
 
   useEffect(() => {
+    setDone(false);
     void load();
   }, [load]);
+
+  const filters = (
+    <div className="row" style={{ flexWrap: "wrap", gap: "var(--s-2)", marginBottom: "var(--s-2)" }}>
+      <select value={action} onChange={(e) => setAction(e.target.value)} style={{ minWidth: 150 }}>
+        <option value="">all actions</option>
+        <option value="login.">sign-ins</option>
+        <option value="profile.">profiles</option>
+        <option value="proxy.">proxies</option>
+        <option value="project.">projects</option>
+        <option value="org.">organisation</option>
+        <option value="session.">sessions</option>
+        <option value="user.">users</option>
+      </select>
+      <input placeholder="who (email)" value={actor} onChange={(e) => setActor(e.target.value)} style={{ width: 200 }} />
+      <input type="date" value={since} onChange={(e) => setSince(e.target.value)} style={{ width: 150 }} />
+      <input type="date" value={until} onChange={(e) => setUntil(e.target.value)} style={{ width: 150 }} />
+    </div>
+  );
 
   if (error) {
     return (
@@ -60,6 +91,7 @@ export function Audit() {
   if (rows.length === 0 && !busy) {
     return (
       <div className="empty pad">
+        {filters}
         <p>Nothing has been recorded yet.</p>
         <p className="muted">
           Actions are written as they happen — invitations, grants, launches,
@@ -71,6 +103,7 @@ export function Audit() {
 
   return (
     <div className="tableWrap">
+      {filters}
       <table className="grid">
         <thead>
           <tr>

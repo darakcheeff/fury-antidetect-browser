@@ -522,6 +522,13 @@ db_test!(the_audit_page_query_matches_the_schema, c, {
             .bind(uuid::Uuid::parse_str(ORG_A).unwrap())
             .bind(None::<i64>)
             .bind(200i64)
+            // The four filters 0010's audit screen added: action prefix,
+            // actor email, since, until. Unset here — the point of this test
+            // is the shape of the row, not the filtering.
+            .bind(None::<String>)
+            .bind(None::<String>)
+            .bind(None::<String>)
+            .bind(None::<String>)
             .fetch_all(&mut c)
             .await
             .expect("the audit page query no longer matches the schema");
@@ -561,4 +568,60 @@ db_test!(whoami_can_tell_a_member_holding_the_key_from_one_waiting_for_it, c, {
         .expect("whoami for a member without a key");
     assert_eq!(email, "w@example.com");
     assert!(!has_key, "a member waiting on the owner must not look like one holding the key");
+});
+
+// ---------------------------------------------------------------------------
+// 0010: the login journal and the organisation's policy
+// ---------------------------------------------------------------------------
+
+db_test!(the_login_journal_is_written_unbound_and_read_only_by_the_org, c, {
+    // The login handler has no caller yet, so it writes through the
+    // SECURITY DEFINER function on an unbound connection.
+    sqlx::query("SELECT set_config('app.user_id', '', false)").execute(&mut c).await.expect("unbind");
+    sqlx::query("SELECT record_login($1::uuid, $2::uuid, $3, $4, $5::inet, $6, $7, $8)")
+        .bind(ORG_A).bind(USER_A).bind("a@example.com").bind("bad_password")
+        .bind("203.0.113.5").bind("laptop").bind("m-1").bind("Fury/0.1")
+        .execute(&mut c).await.expect("record_login from an unbound connection");
+    sqlx::query("SELECT record_login(NULL, NULL, $1, $2, NULL, '', NULL, NULL)")
+        .bind("nobody@example.com").bind("bad_password")
+        .execute(&mut c).await.expect("an unknown address is recorded with no organisation");
+
+    // Unbound, the table reads as empty.
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM login_events").fetch_one(&mut c).await.unwrap();
+    assert_eq!(n, 0, "an unbound connection could read the journal");
+
+    // A's owner sees A's row and not the orphan; B sees nothing.
+    bind(&mut c, USER_A).await;
+    let rows: Vec<(String, String, Option<String>)> =
+        sqlx::query_as("SELECT email, outcome, host(ip) FROM login_events ORDER BY id").fetch_all(&mut c).await.unwrap();
+    assert_eq!(rows, vec![("a@example.com".into(), "bad_password".into(), Some("203.0.113.5".into()))]);
+    bind(&mut c, USER_B).await;
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM login_events").fetch_one(&mut c).await.unwrap();
+    assert_eq!(n, 0, "B can read A's sign-ins");
+
+    // Nobody rewrites history.
+    bind(&mut c, USER_A).await;
+    let rewrite = sqlx::query("UPDATE login_events SET outcome = 'ok'").execute(&mut c).await;
+    assert!(rewrite.is_err(), "the journal accepted an UPDATE");
+    let erase = sqlx::query("DELETE FROM login_events").execute(&mut c).await;
+    assert!(erase.is_err(), "the journal accepted a DELETE");
+});
+
+db_test!(the_policy_is_stored_on_the_organisation_and_reads_back_with_defaults, c, {
+    bind(&mut c, USER_A).await;
+    // An organisation from before 0010 carries '{}', which must read as
+    // "nothing required" — not as an error, not as "always".
+    let p = crate::security::policy_of(&mut c, uuid::Uuid::parse_str(ORG_A).unwrap()).await.unwrap();
+    assert_eq!(p.second_factor, "off");
+    assert!(p.ip_allowlist.is_empty());
+    assert!(p.owner_exempt_from_allowlist);
+
+    sqlx::query("UPDATE organizations SET security = $2 WHERE id = $1::uuid")
+        .bind(ORG_A)
+        .bind(serde_json::json!({ "second_factor": "new_device", "ip_allowlist": ["10.0.0.0/8"] }))
+        .execute(&mut c).await.expect("write policy");
+    let p = crate::security::policy_of(&mut c, uuid::Uuid::parse_str(ORG_A).unwrap()).await.unwrap();
+    assert_eq!(p.second_factor, "new_device");
+    assert!(p.admits(Some("10.2.3.4".parse().unwrap()), fury_shared::rbac::OrgRole::Member));
+    assert!(!p.admits(Some("8.8.8.8".parse().unwrap()), fury_shared::rbac::OrgRole::Member));
 });

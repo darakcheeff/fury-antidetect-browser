@@ -28,6 +28,13 @@ pub enum ApiError {
     #[error("missing permission")]
     Denied(Perm),
 
+    /// Refused by the organisation's sign-in policy, not by a permission:
+    /// the address is not on the allowlist. Named separately so the client
+    /// can say that instead of "wrong password", and so the journal and the
+    /// error agree.
+    #[error("refused by policy: {0}")]
+    Refused(&'static str),
+
     /// Either it does not exist or the caller may not see it. Deliberately
     /// indistinguishable — see the module comment.
     #[error("not found")]
@@ -62,6 +69,7 @@ impl IntoResponse for ApiError {
                 StatusCode::FORBIDDEN,
                 json!({ "error": "denied", "missing_permission": perm }),
             ),
+            ApiError::Refused(reason) => (StatusCode::FORBIDDEN, json!({ "error": "refused", "reason": reason })),
             ApiError::NotFound => (StatusCode::NOT_FOUND, json!({ "error": "not_found" })),
             ApiError::BadRequest(message) => (
                 StatusCode::BAD_REQUEST,

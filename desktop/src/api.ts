@@ -133,6 +133,40 @@ export interface DomainList {
   allow_only: boolean;
 }
 
+export interface LoginOutcome {
+  me: Me | null;
+  challenge: string | null;
+  must_enrol_totp: boolean;
+}
+
+export interface SecurityPolicy {
+  second_factor: "off" | "new_device" | "always";
+  ip_allowlist: string[];
+  owner_exempt_from_allowlist: boolean;
+}
+
+export interface LoginEvent {
+  id: number;
+  email: string;
+  outcome: string;
+  ip: string | null;
+  machine_name: string;
+  user_agent: string | null;
+  at: string;
+}
+
+export interface SessionRow {
+  id: string;
+  user_id: string;
+  email: string;
+  machine_name: string;
+  ip: string | null;
+  user_agent: string | null;
+  created_at: string;
+  last_seen_at: string;
+  current: boolean;
+}
+
 export interface MirrorStatus {
   active: boolean;
   typing: boolean;
@@ -489,8 +523,10 @@ export const api = {
     return cmd<Me>("enrol", { url, code, password, createsOrg });
   },
 
-  async login(email: string, password: string): Promise<Me> {
-    if (isDesktop) return cmd<Me>("login", { email, password });
+  /** A sign-in comes back as an identity, or as a challenge when the
+   *  organisation wants a code first — then `loginTotp` finishes it. */
+  async login(email: string, password: string): Promise<LoginOutcome> {
+    if (isDesktop) return cmd<LoginOutcome>("login", { email, password });
 
     const res = await fetch("/v1/auth/login", {
       method: "POST",
@@ -498,10 +534,29 @@ export const api = {
       body: JSON.stringify({ email, password, machine_name: navigator.platform }),
     });
     if (!res.ok) throw new ApiError(res.status, "Wrong email or password.");
-    const { token } = await res.json();
-    localStorage.setItem(TOKEN_KEY, token);
-    return http<Me>("/v1/me");
+    const body = await res.json();
+    if (body.second_factor === "totp") return { me: null, challenge: body.challenge, must_enrol_totp: false };
+    localStorage.setItem(TOKEN_KEY, body.token);
+    return { me: await http<Me>("/v1/me"), challenge: null, must_enrol_totp: !!body.must_enrol_totp };
   },
+  loginTotp: (email: string, password: string, challenge: string, code: string): Promise<LoginOutcome> =>
+    cmd<LoginOutcome>("login_totp", { email, password, challenge, code }),
+
+  // ---- team security -----------------------------------------------------
+
+  totpStatus: (): Promise<{ enabled: boolean; enabled_at: string | null; pending: boolean; required_by_org: string }> =>
+    cmd("totp_status"),
+  totpSetup: (): Promise<{ uri: string; secret: string }> => cmd("totp_setup"),
+  totpConfirm: (code: string): Promise<{ enabled: boolean }> => cmd("totp_confirm", { code }),
+  totpDisable: (code: string): Promise<{ enabled: boolean }> => cmd("totp_disable", { code }),
+  orgSecurity: (): Promise<{ policy: SecurityPolicy; members: { user_id: string; email: string; totp_enabled_at: string | null }[] }> =>
+    cmd("org_security"),
+  setOrgSecurity: (policy: SecurityPolicy): Promise<{ policy: SecurityPolicy }> => cmd("set_org_security", { policy }),
+  loginEvents: (before?: number | null, outcome?: string | null, email?: string | null): Promise<LoginEvent[]> =>
+    cmd("login_events", { before: before ?? null, outcome: outcome ?? null, email: email ?? null }),
+  sessions: (all: boolean): Promise<SessionRow[]> => cmd("sessions", { all }),
+  revokeSession: (id: string): Promise<{ revoked: number }> => cmd("revoke_session", { id }),
+  revokeMemberSessions: (userId: string): Promise<{ revoked: number }> => cmd("revoke_member_sessions", { userId }),
 
   async logout(): Promise<void> {
     if (isDesktop) return cmd<void>("logout");
@@ -539,7 +594,7 @@ export const api = {
 
   /** Who did what, newest first. Owners and admins only; the server refuses
    *  everyone else, so a Member never sees this screen offered. */
-  audit: (before?: number): Promise<
+  audit: (before?: number, filters?: { action?: string; actor?: string; since?: string; until?: string }): Promise<
     {
       id: number;
       actor: string;
@@ -548,7 +603,13 @@ export const api = {
       detail: unknown;
       at: string;
     }[]
-  > => cmd("audit", { before: before ?? null }),
+  > => cmd("audit", {
+    before: before ?? null,
+    action: filters?.action || null,
+    actor: filters?.actor || null,
+    since: filters?.since || null,
+    until: filters?.until || null,
+  }),
 
   orgMembers: (): Promise<{
     members: {

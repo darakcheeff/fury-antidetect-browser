@@ -16,6 +16,7 @@
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
+use axum::http::HeaderMap;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use fury_shared::api::{
@@ -35,6 +36,15 @@ pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/v1/auth/login", post(login))
         .route("/v1/auth/logout", post(logout))
+        .route("/v1/auth/login/totp", post(crate::security::login_totp))
+        .route("/v1/me/totp", get(crate::security::totp_status).delete(crate::security::totp_disable))
+        .route("/v1/me/totp/setup", post(crate::security::totp_setup))
+        .route("/v1/me/totp/confirm", post(crate::security::totp_confirm))
+        .route("/v1/org/security", get(crate::security::get_policy).put(crate::security::put_policy))
+        .route("/v1/audit/logins", get(crate::security::list_logins))
+        .route("/v1/sessions", get(crate::security::list_sessions))
+        .route("/v1/sessions/{id}", axum::routing::delete(crate::security::revoke_session))
+        .route("/v1/org/members/{user_id}/sessions", axum::routing::delete(crate::security::revoke_member_sessions))
         .route("/v1/auth/enroll", post(complete_enrollment))
         .route("/v1/auth/enroll/{code}", get(peek_enrollment))
         .route("/v1/auth/signup", post(signup))
@@ -121,15 +131,33 @@ pub struct LoginRequest {
     password: String,
     #[serde(default)]
     machine_name: String,
+    /// The installation's own id (settings.rs mints it once). What "a new
+    /// device" is measured against; absent means every sign-in is new.
+    #[serde(default)]
+    machine_id: Option<String>,
 }
 
 async fn login(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<LoginRequest>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let row: Option<(Uuid, String, Vec<u8>, Vec<u8>)> = sqlx::query_as(
-        "SELECT id, password_hash, wrapped_private_key, kdf_salt \
-         FROM users WHERE email = $1 AND disabled_at IS NULL",
+    use crate::security::{self, Attempt};
+    let ip = security::client_ip(&headers);
+    let ua = security::user_agent(&headers);
+    let attempt = |org, user, outcome: &'static str| Attempt {
+        org,
+        user,
+        email: &req.email,
+        outcome,
+        ip,
+        machine_name: &req.machine_name,
+        machine_id: req.machine_id.as_deref(),
+        user_agent: ua.as_deref(),
+    };
+
+    let row: Option<(Uuid, String, Option<Vec<u8>>)> = sqlx::query_as(
+        "SELECT id, password_hash, totp_secret FROM users WHERE email = $1 AND disabled_at IS NULL",
     )
     .bind(&req.email)
     .fetch_optional(&state.db)
@@ -137,25 +165,120 @@ async fn login(
 
     // One failure mode for "no such user" and "wrong password", or the endpoint
     // becomes a way to discover who has an account.
-    let Some((user_id, stored, wrapped_private_key, kdf_salt)) = row else {
+    let Some((user_id, stored, totp_secret)) = row else {
         // Still spend the time an Argon2 verification would take. Returning
         // instantly for unknown addresses is a timing oracle over the user list.
         let _ = auth::verify_password(&req.password, "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$0000000000000000000000000000000000000000000");
+        security::record_login(&state.db, attempt(None, None, "bad_password")).await;
         return Err(ApiError::Unauthenticated);
     };
+
+    // The organisation's policy applies before the password is checked: an
+    // address the list refuses learns nothing about whether the password was
+    // right, and the journal says what happened.
+    let org: Option<(Uuid, String)> = sqlx::query_as(
+        "SELECT org_id, role::text FROM org_members WHERE user_id = $1 LIMIT 1",
+    )
+    .bind(user_id)
+    .fetch_optional(&state.db)
+    .await?;
+    let org_id = org.as_ref().map(|(o, _)| *o);
+    let role = org.as_ref().and_then(|(_, r)| auth::parse_role(r)).unwrap_or(fury_shared::rbac::OrgRole::Member);
+    let policy = match org_id {
+        Some(o) => {
+            let mut conn = state.db.acquire().await?;
+            security::policy_of(&mut conn, o).await?
+        }
+        None => security::Policy::default(),
+    };
+    if !policy.admits(ip, role) {
+        security::record_login(&state.db, attempt(org_id, Some(user_id), "ip_refused")).await;
+        if let Some(o) = org_id {
+            security::audit_login_event(&state.db, o, user_id, "login.ip_refused", json!({
+                "ip": ip.map(|i| i.to_string()), "machine_name": req.machine_name
+            })).await;
+        }
+        return Err(ApiError::Refused("ip_not_allowed"));
+    }
+
     if !auth::verify_password(&req.password, &stored) {
+        security::record_login(&state.db, attempt(org_id, Some(user_id), "bad_password")).await;
+        // Three in a quarter hour is somebody guessing. No mail is sent from
+        // this server; the audit screen is where the owner sees it.
+        if let Some(o) = org_id {
+            if security::failure_burst(&state.db, user_id, &req.email).await {
+                security::audit_login_event(&state.db, o, user_id, "login.failed_burst", json!({
+                    "ip": ip.map(|i| i.to_string()), "machine_name": req.machine_name
+                })).await;
+            }
+        }
         return Err(ApiError::Unauthenticated);
     }
 
+    let enrolled = totp_secret.is_some()
+        && sqlx::query_as::<_, (bool,)>("SELECT totp_enabled_at IS NOT NULL FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_one(&state.db)
+            .await
+            .map(|(b,)| b)
+            .unwrap_or(false);
+    let known = security::known_device(&state.db, user_id, req.machine_id.as_deref()).await;
+
+    if security::second_factor_required(&policy, enrolled, known) {
+        let challenge = security::open_challenge(&state.db, user_id, ip, &req.machine_name, req.machine_id.as_deref(), ua.as_deref()).await?;
+        security::record_login(&state.db, attempt(org_id, Some(user_id), "totp_required")).await;
+        // Not a session: a client holding this can do one thing, which is to
+        // present a code within five minutes.
+        return Ok(Json(json!({ "second_factor": "totp", "challenge": challenge })));
+    }
+
+    let body = issue_session(&state, user_id, &req.machine_name, req.machine_id.as_deref(), ip, ua.as_deref()).await?;
+    security::record_login(&state.db, attempt(org_id, Some(user_id), "ok")).await;
+    if let (Some(o), false) = (org_id, known) {
+        security::audit_login_event(&state.db, o, user_id, "login.new_device", json!({
+            "machine_name": req.machine_name, "ip": ip.map(|i| i.to_string()), "second_factor": false
+        })).await;
+    }
+    let mut body = body;
+    // The organisation wants a second factor and this user has none yet: the
+    // sign-in succeeds — locking people out on the day the policy changes is
+    // how policies get turned off — and the client is told to lead them to
+    // enrolment. The owner's screen shows who has not enrolled.
+    if policy.second_factor != "off" && !enrolled {
+        body["must_enrol_totp"] = json!(true);
+    }
+    Ok(Json(body))
+}
+
+/// A session for a user who has proven who they are — by password, or by
+/// password and code. Shared by `login` and `security::login_totp` so the two
+/// halves of a sign-in cannot drift apart in what they hand back.
+pub(crate) async fn issue_session(
+    state: &AppState,
+    user_id: Uuid,
+    machine_name: &str,
+    machine_id: Option<&str>,
+    ip: Option<std::net::IpAddr>,
+    user_agent: Option<&str>,
+) -> ApiResult<serde_json::Value> {
+    let (wrapped_private_key, kdf_salt): (Vec<u8>, Vec<u8>) =
+        sqlx::query_as("SELECT wrapped_private_key, kdf_salt FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_one(&state.db)
+            .await?;
+
     let (raw, digest) = auth::new_token();
     sqlx::query(
-        "INSERT INTO sessions (token_hash, user_id, expires_at, machine_name) \
-         VALUES ($1, $2, now() + ($3 || ' hours')::interval, $4)",
+        "INSERT INTO sessions (token_hash, user_id, expires_at, machine_name, machine_id, ip, user_agent) \
+         VALUES ($1, $2, now() + ($3 || ' hours')::interval, $4, $5, $6::inet, $7)",
     )
     .bind(&digest)
     .bind(user_id)
     .bind(auth::SESSION_TTL_HOURS.to_string())
-    .bind(&req.machine_name)
+    .bind(machine_name)
+    .bind(machine_id)
+    .bind(ip.map(|i| i.to_string()))
+    .bind(user_agent)
     .execute(&state.db)
     .await?;
 
@@ -175,7 +298,7 @@ async fn login(
     use base64::Engine;
     let b64 = |v: &[u8]| base64::engine::general_purpose::STANDARD.encode(v);
 
-    Ok(Json(json!({
+    Ok(json!({
         "token": raw,
         "user_id": user_id,
         "wrapped_private_key": b64(&wrapped_private_key),
@@ -193,7 +316,7 @@ async fn login(
         // and quietly return them to a key somebody else still holds. The
         // client refuses anything below the highest generation it has seen.
         "ork_generation": org.as_ref().and_then(|(_, _, _, g)| *g),
-    })))
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -1387,6 +1510,10 @@ pub(crate) fn audit_page_sql() -> String {
         "SELECT e.id, u.email, e.action, e.target_id, e.detail, {} \
          FROM audit_events e LEFT JOIN users u ON u.id = e.actor_user_id \
          WHERE e.org_id = $1 AND ($2::bigint IS NULL OR e.id < $2) \
+           AND ($4::text IS NULL OR e.action LIKE $4 || '%') \
+           AND ($5::text IS NULL OR u.email = $5) \
+           AND ($6::text IS NULL OR e.at >= $6::timestamptz) \
+           AND ($7::text IS NULL OR e.at <= $7::timestamptz) \
          ORDER BY e.id DESC LIMIT $3",
         rfc3339("e.at"),
     )
@@ -1436,6 +1563,10 @@ async fn list_audit(
         .bind(caller.org_id)
         .bind(q.before)
         .bind(limit)
+        .bind(q.action.filter(|s| !s.is_empty()))
+        .bind(q.actor.filter(|s| !s.is_empty()))
+        .bind(q.since.filter(|s| !s.is_empty()))
+        .bind(q.until.filter(|s| !s.is_empty()))
         .fetch_all(db.as_mut())
         .await?;
 
@@ -1463,6 +1594,14 @@ struct AuditQuery {
     /// Page by id rather than by offset: rows arrive while somebody is
     /// reading, and OFFSET would show them a row twice or not at all.
     before: Option<i64>,
+    /// An action prefix: `profile.` for everything done to profiles,
+    /// `login.` for sign-in notices. The names are dotted for this.
+    action: Option<String>,
+    /// One member, by email.
+    actor: Option<String>,
+    /// RFC 3339 bounds.
+    since: Option<String>,
+    until: Option<String>,
 }
 
 #[derive(serde::Serialize)]

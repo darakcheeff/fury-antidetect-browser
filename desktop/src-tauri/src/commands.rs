@@ -237,11 +237,20 @@ impl AppState {
             if status == reqwest::StatusCode::UNAUTHORIZED {
                 self.session.clear();
             }
+            // A policy refusal names its reason; the interface has a sentence
+            // for it. Everything else stays a status the interface describes.
+            let code = if parsed.get("error").and_then(|v| v.as_str()) == Some("refused")
+                && parsed.get("reason").and_then(|v| v.as_str()) == Some("ip_not_allowed")
+            {
+                Some("err.ipNotAllowed")
+            } else {
+                None
+            };
             return Err(ApiErr {
                 status: status.as_u16(),
                 body: parsed,
                 message: format!("Request failed ({status})."),
-                code: None,
+                code,
             });
         }
 
@@ -536,27 +545,78 @@ pub struct Me {
     pub role: String,
 }
 
-#[tauri::command]
-pub async fn login(state: State<'_, AppState>, email: String, password: String) -> R<Me> {
-    #[derive(Deserialize)]
-    struct LoginOk {
-        token: String,
-        wrapped_private_key: String,
-        kdf_salt: String,
-        wrapped_ork: Option<String>,
-        #[serde(default)]
-        ork_generation: Option<i32>,
-    }
+#[derive(Deserialize)]
+struct LoginOk {
+    token: String,
+    wrapped_private_key: String,
+    kdf_salt: String,
+    wrapped_ork: Option<String>,
+    #[serde(default)]
+    ork_generation: Option<i32>,
+    /// The organisation requires a second factor and this account has none
+    /// yet. The sign-in went through; the interface leads to enrolment.
+    #[serde(default)]
+    must_enrol_totp: bool,
+}
 
+/// What a sign-in attempt came back with: an identity, or a request for the
+/// code first.
+#[derive(Serialize)]
+pub struct LoginOutcome {
+    pub me: Option<Me>,
+    /// Present when the server wants a TOTP code before it issues a session.
+    /// Hand it back with the code through `login_totp`.
+    pub challenge: Option<String>,
+    pub must_enrol_totp: bool,
+}
+
+#[tauri::command]
+pub async fn login(state: State<'_, AppState>, email: String, password: String) -> R<LoginOutcome> {
+    let (machine_name, machine_id) = {
+        let s = state.settings.lock().unwrap();
+        (settings::machine_name(), s.machine_id.clone())
+    };
     let body = serde_json::json!({
         "email": email,
         "password": password,
-        "machine_name": settings::machine_name(),
+        "machine_name": machine_name,
+        // What the server measures "a new device" against: settings.rs mints
+        // it once per installation.
+        "machine_id": machine_id,
     });
 
-    let ok: LoginOk = state
+    let raw: serde_json::Value = state
         .call(reqwest::Method::POST, "/v1/auth/login", Body::Json(body), false)
         .await?;
+
+    // Half a sign-in: the password was right and the organisation wants a code.
+    if raw.get("second_factor").and_then(|v| v.as_str()) == Some("totp") {
+        return Ok(LoginOutcome {
+            me: None,
+            challenge: raw.get("challenge").and_then(|v| v.as_str()).map(str::to_string),
+            must_enrol_totp: false,
+        });
+    }
+    let ok: LoginOk = serde_json::from_value(raw).map_err(|e| ApiErr::local(format!("unexpected login reply: {e}")))?;
+    let must_enrol = ok.must_enrol_totp;
+    let me = finish_login(&state, ok, &email, &password).await?;
+    Ok(LoginOutcome { me: Some(me), challenge: None, must_enrol_totp: must_enrol })
+}
+
+/// The second half of a sign-in: the code for the challenge `login` returned.
+/// The password comes again because the organisation key is unwrapped from it,
+/// and it existed in this process only for the duration of the first call.
+#[tauri::command]
+pub async fn login_totp(state: State<'_, AppState>, email: String, password: String, challenge: String, code: String) -> R<LoginOutcome> {
+    let body = serde_json::json!({ "challenge": challenge, "code": code });
+    let ok: LoginOk = state
+        .call(reqwest::Method::POST, "/v1/auth/login/totp", Body::Json(body), false)
+        .await?;
+    let me = finish_login(&state, ok, &email, &password).await?;
+    Ok(LoginOutcome { me: Some(me), challenge: None, must_enrol_totp: false })
+}
+
+async fn finish_login(state: &State<'_, AppState>, ok: LoginOk, email: &str, password: &str) -> R<Me> {
     state.session.store(&ok.token);
 
     // Unwrap the organisation key while the password is still in hand — it is
@@ -565,7 +625,7 @@ pub async fn login(state: State<'_, AppState>, email: String, password: String) 
     // account, and should be able to see the team rather than a login error.
     {
         let mut settings = state.settings.lock().unwrap();
-        settings.last_email = Some(email.clone());
+        settings.last_email = Some(email.to_string());
         let _ = settings.save(&state.config_dir);
     }
 
@@ -587,7 +647,7 @@ pub async fn login(state: State<'_, AppState>, email: String, password: String) 
         }
     }
 
-    match crypto::unlock_org_key(&password, &ok.kdf_salt, &ok.wrapped_private_key, ok.wrapped_ork.as_deref()) {
+    match crypto::unlock_org_key(password, &ok.kdf_salt, &ok.wrapped_private_key, ok.wrapped_ork.as_deref()) {
         Ok(key) => {
             *state.org_key.lock().unwrap() = key;
             if let Some(k) = key.as_ref() {
@@ -614,6 +674,67 @@ pub async fn login(state: State<'_, AppState>, email: String, password: String) 
     state
         .call(reqwest::Method::GET, "/v1/me", Body::None, true)
         .await
+}
+
+// ---- team security: the second factor, the policy, sessions, journals -----
+
+#[tauri::command]
+pub async fn totp_status(state: State<'_, AppState>) -> R<serde_json::Value> {
+    state.call(reqwest::Method::GET, "/v1/me/totp", Body::None, true).await
+}
+#[tauri::command]
+pub async fn totp_setup(state: State<'_, AppState>) -> R<serde_json::Value> {
+    state.call(reqwest::Method::POST, "/v1/me/totp/setup", Body::Json(serde_json::json!({})), true).await
+}
+#[tauri::command]
+pub async fn totp_confirm(state: State<'_, AppState>, code: String) -> R<serde_json::Value> {
+    state.call(reqwest::Method::POST, "/v1/me/totp/confirm", Body::Json(serde_json::json!({ "code": code })), true).await
+}
+#[tauri::command]
+pub async fn totp_disable(state: State<'_, AppState>, code: String) -> R<serde_json::Value> {
+    state.call(reqwest::Method::DELETE, "/v1/me/totp", Body::Json(serde_json::json!({ "code": code })), true).await
+}
+#[tauri::command]
+pub async fn org_security(state: State<'_, AppState>) -> R<serde_json::Value> {
+    state.call(reqwest::Method::GET, "/v1/org/security", Body::None, true).await
+}
+#[tauri::command]
+pub async fn set_org_security(state: State<'_, AppState>, policy: serde_json::Value) -> R<serde_json::Value> {
+    state.call(reqwest::Method::PUT, "/v1/org/security", Body::Json(policy), true).await
+}
+#[tauri::command]
+pub async fn login_events(state: State<'_, AppState>, before: Option<i64>, outcome: Option<String>, email: Option<String>) -> R<serde_json::Value> {
+    let mut q = vec![];
+    if let Some(b) = before { q.push(format!("before={b}")); }
+    if let Some(o) = outcome.filter(|s| !s.is_empty()) { q.push(format!("outcome={}", urlencoding(&o))); }
+    if let Some(e) = email.filter(|s| !s.is_empty()) { q.push(format!("email={}", urlencoding(&e))); }
+    let path = if q.is_empty() { "/v1/audit/logins".to_string() } else { format!("/v1/audit/logins?{}", q.join("&")) };
+    state.call(reqwest::Method::GET, &path, Body::None, true).await
+}
+#[tauri::command]
+pub async fn sessions(state: State<'_, AppState>, all: bool) -> R<serde_json::Value> {
+    let path = if all { "/v1/sessions?all=1" } else { "/v1/sessions" };
+    state.call(reqwest::Method::GET, path, Body::None, true).await
+}
+#[tauri::command]
+pub async fn revoke_session(state: State<'_, AppState>, id: String) -> R<serde_json::Value> {
+    state.call(reqwest::Method::DELETE, &format!("/v1/sessions/{id}"), Body::None, true).await
+}
+#[tauri::command]
+pub async fn revoke_member_sessions(state: State<'_, AppState>, user_id: String) -> R<serde_json::Value> {
+    state.call(reqwest::Method::DELETE, &format!("/v1/org/members/{user_id}/sessions"), Body::None, true).await
+}
+
+/// Query-string escaping for the few characters an email or a filter can carry.
+fn urlencoding(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
 }
 
 /// What an invitation code is for, before anyone types a password.
@@ -1451,12 +1572,22 @@ pub async fn set_remember_org_key(state: State<'_, AppState>, remember: bool) ->
 
 /// Who did what. Owners and admins only — the server decides that, not this.
 #[tauri::command]
-pub async fn audit(state: State<'_, AppState>, before: Option<i64>) -> R<serde_json::Value> {
-    let path = match before {
-        Some(id) => format!("/v1/audit?limit=200&before={id}"),
-        None => "/v1/audit?limit=200".to_string(),
-    };
-    state.call(reqwest::Method::GET, &path, Body::None, true).await
+pub async fn audit(
+    state: State<'_, AppState>,
+    before: Option<i64>,
+    action: Option<String>,
+    actor: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
+) -> R<serde_json::Value> {
+    let mut q = vec!["limit=200".to_string()];
+    if let Some(id) = before { q.push(format!("before={id}")); }
+    for (k, v) in [("action", action), ("actor", actor), ("since", since), ("until", until)] {
+        if let Some(v) = v.filter(|s| !s.is_empty()) {
+            q.push(format!("{k}={}", urlencoding(&v)));
+        }
+    }
+    state.call(reqwest::Method::GET, &format!("/v1/audit?{}", q.join("&")), Body::None, true).await
 }
 
 #[tauri::command]

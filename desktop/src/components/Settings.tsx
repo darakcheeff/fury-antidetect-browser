@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { api, type DomainList, type Shell } from "../api";
+import { SecondFactor } from "./SecondFactor";
 import { languages, useI18n, type Language } from "../i18n";
 import { type Theme, themes, useTheme } from "../theme";
 
@@ -222,6 +223,7 @@ export function Settings({
               )}
             </div>
           )}
+          {tab === "team" && shell.mode !== "local" && shell.signed_in && <SecondFactor />}
 
           {tab === "data" && (
             <>

@@ -65,6 +65,16 @@ pub fn new_token() -> (String, Vec<u8>) {
 /// is 256 bits of uniform randomness, so there is no dictionary to attack and
 /// nothing for a slow hash to buy. Passwords are a different matter — see
 /// `verify_password`.
+/// The hash of the token this request carries, if it carries one — for a
+/// session list to mark the row that is asking.
+pub fn token_hash_from_headers(headers: &axum::http::HeaderMap) -> Option<Vec<u8>> {
+    headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(hash_token)
+}
+
 pub fn hash_token(raw: &str) -> Vec<u8> {
     Sha256::digest(raw.as_bytes()).to_vec()
 }

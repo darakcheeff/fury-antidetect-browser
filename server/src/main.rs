@@ -14,6 +14,7 @@ mod auth;
 mod enroll;
 mod error;
 mod rbac_guard;
+mod security;
 #[cfg(test)]
 mod rls_tests;
 

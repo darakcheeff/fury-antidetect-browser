@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type Perm, type Project } from "../api";
 import { useI18n } from "../i18n";
 import { Audit } from "./Audit";
+import { Security } from "./Security";
 import { useAsk } from "./Ask";
 
 type Members = Awaited<ReturnType<typeof api.orgMembers>>;
@@ -436,7 +437,8 @@ export function Users({
       {(team.members.find((m) => m.is_you)?.role === "owner" ||
         team.members.find((m) => m.is_you)?.role === "admin") && (
         <>
-          <h2 className="sectionTitle">{t("team.audit")}</h2>
+          <Security isOwner={team.members.find((m) => m.is_you)?.role === "owner"} />
+          <h2 className="sectionTitle" style={{ marginTop: "var(--s-6)" }}>{t("team.audit")}</h2>
           <Audit />
         </>
       )}

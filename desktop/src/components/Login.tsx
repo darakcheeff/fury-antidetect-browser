@@ -47,6 +47,10 @@ export function Login({
   /// Whether the last look found the key still missing, so the button can say
   /// that it looked.
   const [waited, setWaited] = useState(false);
+  // The organisation wants a code: the password was right, and this is the
+  // challenge to answer it against.
+  const [challenge, setChallenge] = useState<string | null>(null);
+  const [code, setCode] = useState("");
   const { t } = useI18n();
 
   const submit = async (e: React.FormEvent) => {
@@ -54,7 +58,20 @@ export function Login({
     setBusy(true);
     setError(null);
     try {
-      await api.login(email, password);
+      const outcome = challenge
+        ? await api.loginTotp(email, password, challenge, code)
+        : await api.login(email, password);
+      if (outcome.challenge) {
+        setChallenge(outcome.challenge);
+        setCode("");
+        return;
+      }
+      if (outcome.must_enrol_totp) {
+        // Told, not blocked: the sign-in stands, and Settings has the
+        // enrolment. Locking people out the day a policy changes is how
+        // policies get turned off.
+        sessionStorage.setItem("fury.mustEnrolTotp", "1");
+      }
       // Unlocking is not the same as signing in, and it is only the second one
       // that this call finishing means. A member whose key has not been handed
       // over signs in perfectly and unlocks nothing — so before reporting
@@ -69,11 +86,13 @@ export function Login({
         }
       }
       onSuccess();
-    } catch {
+    } catch (e) {
       // The server answers identically for an unknown address and a wrong
       // password, so this message must not distinguish them either — saying
-      // "no such user" here would undo that.
-      setError(t("auth.wrong"));
+      // "no such user" here would undo that. A refusal by the organisation's
+      // address list is a different thing and says so.
+      const code = (e as { code?: string } | null)?.code;
+      setError(code === "err.ipNotAllowed" ? t("err.ipNotAllowed") : challenge ? t("auth.wrongCode") : t("auth.wrong"));
     } finally {
       setBusy(false);
     }
@@ -209,12 +228,32 @@ export function Login({
         type="password"
         placeholder={t("auth.password")}
         value={password}
+        disabled={challenge !== null}
         onChange={(e) => setPassword(e.target.value)}
       />
+      {challenge && (
+        <>
+          <p className="muted center small">{t("auth.codeWhy")}</p>
+          <input
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            placeholder={t("auth.code")}
+            value={code}
+            autoFocus
+            maxLength={6}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+          />
+        </>
+      )}
       {error && <p className="error">{error}</p>}
-      <button type="submit" disabled={busy || !email || !password}>
-        {busy ? t("auth.signingIn") : unlockFor ? t("auth.unlock") : t("auth.signIn")}
+      <button type="submit" disabled={busy || !email || !password || (challenge !== null && code.length !== 6)}>
+        {busy ? t("auth.signingIn") : challenge ? t("auth.confirmCode") : unlockFor ? t("auth.unlock") : t("auth.signIn")}
       </button>
+      {challenge && (
+        <button type="button" className="quiet" onClick={() => { setChallenge(null); setCode(""); setError(null); }}>
+          {t("ui.cancel")}
+        </button>
+      )}
       {!unlockFor && (
         <>
           {/* Two doors, and they are not the same one. An invitation joins a
