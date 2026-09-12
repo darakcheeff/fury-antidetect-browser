@@ -341,7 +341,7 @@
   };
 
   $('copy').onclick = async () => {
-    await navigator.clipboard.writeText(JSON.stringify(dump, null, 2));
+    await navigator.clipboard.writeText(JSON.stringify(forDownload(dump), null, 2));
     $('copy').textContent = 'Скопировано';
     setTimeout(() => ($('copy').textContent = 'Скопировать JSON'), 1500);
   };
@@ -377,11 +377,29 @@
     }
   })();
 
+  /* The file a person downloads is the file they will drop into a public
+   * issue. The WebRTC section carries their public address, and the persona
+   * converter never reads it (a persona has nothing network-shaped in it), so
+   * when hosted it leaves the file before the file leaves the page. RFC 5737
+   * placeholders rather than deletion, the same rule as `fury-detect redact`,
+   * so the section keeps its shape and its count. Measured 12.09.2026: the
+   * first hosted capture had the operator's real address in it. */
+  function forDownload(d) {
+    if (!hosted || !d || !d.webrtc) return d;
+    const copy = JSON.parse(JSON.stringify(d));
+    if (Array.isArray(copy.webrtc.addresses)) {
+      copy.webrtc.addresses = copy.webrtc.addresses.map((a, i) =>
+        /\.local$/.test(a) ? a : '203.0.113.' + (i + 1));
+    }
+    copy.webrtc.redacted = true;
+    return copy;
+  }
+
   $('save').onclick = () => {
     const ua = (dump.clientHints && dump.clientHints.uaFullVersion) || 'unknown';
     const plat = (dump.navigator.platform || 'unknown').replace(/\W+/g, '');
     const name = 'fingerprint-' + plat + '-' + ua + '.json';
-    const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(forDownload(dump), null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = name;
