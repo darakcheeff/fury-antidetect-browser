@@ -13,6 +13,7 @@
 mod blocklist;
 mod bundle;
 mod cookies;
+mod diagnose;
 mod core_download;
 mod ext;
 mod http;

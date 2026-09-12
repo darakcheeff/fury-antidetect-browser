@@ -1496,3 +1496,16 @@ select option {
 }
 .loginForm label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
 .loginForm .muted { font-size: 11px; }
+
+/* The proxy cell opens the network report; a pointer says so before the hover
+   title does. */
+td.clickable { cursor: pointer; }
+td.clickable:hover .mono { text-decoration: underline; text-decoration-color: var(--text-faint); }
+
+/* The step list of a network report: a mark, the step, what happened. */
+ol.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-2); }
+ol.steps li { display: grid; grid-template-columns: 18px 200px 1fr; gap: var(--s-2); align-items: baseline; }
+ol.steps li .hint { grid-column: 3; margin-top: 0; }
+ol.steps li.ok .stepMark { color: var(--ok); }
+ol.steps li.bad .stepMark { color: var(--accent); }
+ol.steps .stepName { color: var(--text-dim); }

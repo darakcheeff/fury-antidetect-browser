@@ -3,6 +3,7 @@
 
 import { useState } from "react";
 import { api, type LocalProxy } from "../api";
+import { NetworkReport } from "./NetworkReport";
 import { useI18n } from "../i18n";
 
 const KINDS = ["socks5", "http", "https"] as const;
@@ -36,6 +37,7 @@ export function ProxyForm({
     ok: boolean; error?: string; ip?: string; country?: string;
     city?: string; timezone?: string; ms?: number;
   } | null>(null);
+  const [diagnosing, setDiagnosing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -84,7 +86,19 @@ export function ProxyForm({
                   }}>
                   {busy ? t("px.checking") : t("px.checkButton")}
                 </button>
+                <button style={{ whiteSpace: "nowrap" }} className="ghost" disabled={busy || !complete}
+                  onClick={() => setDiagnosing(true)}>
+                  {t("net.diagnose")}
+                </button>
               </div>
+              {diagnosing && (
+                <NetworkReport
+                  url={url()}
+                  proxy={editing ? { id: editing.id, name: editing.name, kind: editing.kind, display: `${editing.host}:${editing.port}`, country: editing.last_country } : null}
+                  checkerUrl={checker}
+                  onClose={() => setDiagnosing(false)}
+                />
+              )}
               {check && (
                 <div className={check.ok ? "verdict good" : "verdict bad"} style={{ marginTop: "var(--s-2)" }}>
                   {check.ok

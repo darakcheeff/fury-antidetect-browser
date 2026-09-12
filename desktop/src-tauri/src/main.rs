@@ -130,6 +130,7 @@ fn main() {
             commands::totp_code,
             commands::save_proxy,
             commands::check_proxy,
+            commands::diagnose_proxy,
             commands::rotate_proxy,
             commands::delete_proxy,
             commands::save_profile,

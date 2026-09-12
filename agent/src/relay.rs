@@ -312,7 +312,9 @@ impl Relay {
         Ok(())
     }
 
-    async fn dial(&self, host: &str, port: u16) -> Result<Conn, RelayError> {
+    /// `pub(crate)` for `diagnose`, which wants to fail exactly where a
+    /// profile would fail, for the same reason.
+    pub(crate) async fn dial(&self, host: &str, port: u16) -> Result<Conn, RelayError> {
         match &self.upstream {
             Upstream::Http {
                 host: phost,
@@ -638,7 +640,7 @@ impl Relay {
 /// `localhost` are not resolved here (the relay never resolves; that is the
 /// upstream's job), so a LAN hostname passes — the upstream, if it is remote,
 /// cannot reach it anyway, and if it is local this is the residual gap.
-fn is_local_target(host: &str) -> bool {
+pub(crate) fn is_local_target(host: &str) -> bool {
     let h = host.trim_start_matches('[').trim_end_matches(']').to_ascii_lowercase();
     if h == "localhost" || h.ends_with(".localhost") || h.ends_with(".local") {
         return true;

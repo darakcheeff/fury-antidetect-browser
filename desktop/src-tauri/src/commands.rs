@@ -1985,17 +1985,14 @@ pub async fn save_proxy(
     }
 }
 
-#[tauri::command]
-pub async fn check_proxy(
-    state: State<'_, AppState>,
+/// The proxy as a URL the agent can dial. In local mode that is what the
+/// interface sent; on a team server the credentials are sealed, so they are
+/// fetched and opened here — the interface never sees a password.
+async fn resolve_proxy_url(
+    state: &State<'_, AppState>,
     url: String,
-    checker_url: Option<String>,
-    // proxy_id is set when checking a proxy already stored on a server: the
-    // interface has no password to build a URL from, so the credentials are
-    // fetched and opened here instead.
     proxy_id: Option<String>,
-) -> R<serde_json::Value> {
-    let stored_id = proxy_id.clone();
+) -> R<String> {
     let url = match proxy_id.filter(|_| mode_of(&state) != "local") {
         None => url,
         Some(id) => {
@@ -2040,13 +2037,45 @@ pub async fn check_proxy(
             }
         }
     };
+    Ok(url)
+}
 
+#[tauri::command]
+pub async fn check_proxy(
+    state: State<'_, AppState>,
+    url: String,
+    checker_url: Option<String>,
+    // proxy_id is set when checking a proxy already stored on a server: the
+    // interface has no password to build a URL from, so the credentials are
+    // fetched and opened here instead.
+    proxy_id: Option<String>,
+) -> R<serde_json::Value> {
+    let stored_id = proxy_id.clone();
+    let url = resolve_proxy_url(&state, url, proxy_id).await?;
     // The check itself always runs on this machine, in both modes: it is the
     // machine whose exit the answer describes.
     Ok(crate::agent::call(
         "proxies.check",
         // The id, when there is one, so the agent can remember what it learned
         // and a launch that follows this exit does not ask again.
+        serde_json::json!({ "url": url, "checker_url": checker_url, "id": stored_id }),
+    )
+    .await?)
+}
+
+/// The check step by step, with the first failure named — see
+/// agent/src/diagnose.rs. Same URL resolution as `check_proxy`.
+#[tauri::command]
+pub async fn diagnose_proxy(
+    state: State<'_, AppState>,
+    url: String,
+    checker_url: Option<String>,
+    proxy_id: Option<String>,
+) -> R<serde_json::Value> {
+    let stored_id = proxy_id.clone();
+    let url = resolve_proxy_url(&state, url, proxy_id).await?;
+    Ok(crate::agent::call(
+        "proxies.diagnose",
         serde_json::json!({ "url": url, "checker_url": checker_url, "id": stored_id }),
     )
     .await?)

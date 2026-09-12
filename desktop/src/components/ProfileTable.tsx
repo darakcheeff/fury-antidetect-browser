@@ -47,6 +47,7 @@ export function ProfileTable({
   onEdit,
   onDelete,
   onExtensions,
+  onNetwork,
   selected,
   onToggle,
   onToggleAll,
@@ -65,6 +66,8 @@ export function ProfileTable({
   onDelete?: (p: Profile) => void;
   /** Extensions and disk usage — the two things beside the browser data. */
   onExtensions?: (p: Profile) => void;
+  /** What network this profile is on, step by step. Opens from the proxy cell. */
+  onNetwork?: (p: Profile) => void;
   selected: Set<string>;
   onToggle: (id: string) => void;
   onToggleAll: () => void;
@@ -169,7 +172,11 @@ export function ProfileTable({
                   {p.project_name ?? <span className="dim">{t("col.noProject")}</span>}
                 </td>
               )}
-              <td>
+              <td
+                className={p.proxy && onNetwork ? "clickable" : undefined}
+                title={p.proxy && onNetwork ? t("net.current") : undefined}
+                onClick={() => p.proxy && onNetwork?.(p)}
+              >
                 {p.proxy ? (
                   <>
                     <div className="mono">{p.proxy.display}</div>

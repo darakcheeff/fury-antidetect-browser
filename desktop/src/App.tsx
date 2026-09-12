@@ -9,6 +9,7 @@ import { ProfileDialog } from "./components/ProfileDialog";
 import { BulkProfiles } from "./components/BulkProfiles";
 import { Cookies } from "./components/Cookies";
 import { Extensions } from "./components/Extensions";
+import { NetworkReport } from "./components/NetworkReport";
 import { useAsk } from "./components/Ask";
 import { CommandPalette, type Command } from "./components/CommandPalette";
 import { ProfileTable, isOpenHere } from "./components/ProfileTable";
@@ -55,6 +56,7 @@ export function App() {
   const [bulk, setBulk] = useState<Profile | null | undefined>(undefined);
   const [cookiesFor, setCookiesFor] = useState<Profile | null>(null);
   const [extFor, setExtFor] = useState<Profile | null>(null);
+  const [netFor, setNetFor] = useState<Profile | null>(null);
   const [view, setView] = useState<View>("profiles");
   const [openOnly, setOpenOnly] = useState(false);
   /** A line of information at the top of the window, and — when it is about a
@@ -1035,6 +1037,7 @@ export function App() {
               onStop={onStop}
               onEdit={setEditing}
               onExtensions={setExtFor}
+              onNetwork={setNetFor}
               /* Offered always, and gated per row rather than per mode.
                  It used to be handed over only in local mode, so connecting to
                  a server removed the delete button from EVERY row -- including
@@ -1140,6 +1143,9 @@ export function App() {
 
         {cookiesFor && (
           <Cookies profile={cookiesFor} onClose={() => setCookiesFor(null)} />
+        )}
+        {netFor && netFor.proxy && (
+          <NetworkReport proxy={netFor.proxy} onClose={() => setNetFor(null)} />
         )}
         {extFor && (
           <Extensions

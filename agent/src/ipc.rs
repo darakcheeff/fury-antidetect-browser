@@ -721,6 +721,47 @@ impl Agent {
                 }))
             }
 
+            // The check, step by step, with the first failure named. See
+            // diagnose.rs for why "could not connect" was not enough.
+            "proxies.diagnose" => {
+                // Either the URL as typed, or the id of a stored proxy — a row
+                // in the profile list knows the id and not the password, and
+                // the password belongs here, not in the interface.
+                let stored = match params.get("id").and_then(|v| v.as_str()) {
+                    Some(id) => self.store.proxies().await?.into_iter().find(|p| p.id == id),
+                    None => None,
+                };
+                let url = match params.get("url").and_then(|v| v.as_str()).filter(|u| !u.trim().is_empty()) {
+                    Some(u) => u.to_string(),
+                    None => stored
+                        .as_ref()
+                        .map(|p| p.url())
+                        .ok_or_else(|| anyhow::anyhow!("missing parameter \"url\" (or an \"id\" of a stored proxy)"))?,
+                };
+                let checker_owned = params
+                    .get("checker_url")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+                    .or_else(|| stored.as_ref().and_then(|p| p.checker_url.clone()));
+                let report = crate::diagnose::run(&url, checker_owned.as_deref()).await;
+                // Remember a good exit the same way `check` does.
+                if report.ok {
+                    if let Some(id) = params.get("id").and_then(|v| v.as_str()) {
+                        let _ = self
+                            .store
+                            .record_exit(
+                                id,
+                                report.exit.ip.as_deref(),
+                                report.exit.country.as_deref(),
+                                report.exit.timezone.as_deref(),
+                                None,
+                            )
+                            .await;
+                    }
+                }
+                Ok(serde_json::to_value(report)?)
+            }
+
             // Ask the provider for a new exit.
             //
             // Rotating residential and mobile proxies are sold with a link that

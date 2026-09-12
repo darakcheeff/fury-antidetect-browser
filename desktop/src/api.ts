@@ -129,6 +129,16 @@ export interface DomainList {
   allow_only: boolean;
 }
 
+export interface Diagnosis {
+  ok: boolean;
+  steps: { step: string; ok: boolean; ms: number | null; detail: string; code: string | null }[];
+  exit: {
+    ip: string | null; country: string | null; region: string | null; city: string | null;
+    timezone: string | null; org: string | null;
+  };
+  notes: { code: string; detail: string }[];
+}
+
 export interface Extension {
   id: string;
   name: string;
@@ -653,6 +663,10 @@ export const api = {
     ok: boolean; error?: string; ip?: string; country?: string;
     city?: string; timezone?: string; org?: string; ms?: number;
   }> => cmd("check_proxy", { url, checkerUrl: checkerUrl || null, proxyId: proxyId || null }),
+  /** The check step by step; the first failing step carries a `code` the
+   *  interface translates. See agent/src/diagnose.rs. */
+  diagnoseProxy: (url: string, checkerUrl?: string | null, proxyId?: string | null): Promise<Diagnosis> =>
+    cmd<Diagnosis>("diagnose_proxy", { url, checkerUrl: checkerUrl || null, proxyId: proxyId || null }),
   rotateProxy: (id: string): Promise<{ ok: boolean; error?: string }> =>
     cmd("rotate_proxy", { id }),
   // ---- giving one profile to one person --------------------------------
