@@ -10,7 +10,7 @@ whether it does anything.
 
 ## The most useful thing you can send
 
-**A persona from your computer.** The catalogue has 26 machines and every one is
+**A persona from your computer.** The catalogue has 27 machines and every one is
 a crowd for somebody to hide in. If your machine is not in it — a different GPU,
 a different screen, a Linux laptop, an older Windows — that is the highest-value
 contribution there is, and it takes one command.
