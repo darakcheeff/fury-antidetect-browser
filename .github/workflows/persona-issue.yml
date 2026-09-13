@@ -6,9 +6,13 @@
 # the form, and comments on their issue with the result either way.
 name: persona from issue
 
+# `labeled` is here because the first real submission (#5) arrived without the
+# label: the form asks for `persona`, the label did not exist in the repository,
+# and GitHub drops a label it cannot find without a word. Applying it by hand
+# is a `labeled` event, not an `edited` one, and the job stayed skipped.
 on:
   issues:
-    types: [opened, edited]
+    types: [opened, edited, labeled]
 
 permissions:
   contents: write
