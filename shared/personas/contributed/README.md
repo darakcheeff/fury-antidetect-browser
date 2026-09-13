@@ -12,6 +12,11 @@ ways — **Settings → Add this machine to the catalogue** in the desktop, or
 `tools/detect-suite/capture-chrome.sh` + `fury-detect persona` — end in the same
 form or in a pull request of your own.
 
+**Somebody sent you the file and has no GitHub account?** Drop it into the
+form yourself with their name in the machine field — or, without GitHub at
+all: `tools/persona-from-file.sh <capture.json> "<what machine>" "<who>"`
+converts, redacts, names, checks and leaves the file here ready to commit.
+
 Before opening a pull request, run what CI runs:
 
 ```bash
