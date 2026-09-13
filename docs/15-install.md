@@ -1,14 +1,19 @@
 # Installing Fury
 
-> **There are no releases yet.** Every download link on this page points at a
-> Releases page that is empty, and it will stay empty until a build has been
-> signed and measured. Until then the way in is to build it: the application and
-> the agent take minutes (`cargo build --release`), the browser core takes about
-> three hours ([docs/03](03-chromium-fork.md)).
+> **There are releases, and they are not signed.** The
+> [Releases](https://github.com/furyteamtop/fury-antidetect-browser/releases)
+> page has had builds since 18.08.2026; the current one is 0.1.3, for macOS on
+> Apple Silicon and for Windows x64, marked pre-release. Each ships with
+> `SHA256SUMS` and a `REPORT.md` — the measurement the core passed before it was
+> published. What is still missing is a signature: a macOS download needs one
+> extra step and Windows shows a SmartScreen warning, both covered below. To
+> build instead, the application and the agent take minutes
+> (`cargo build --release`) and the core about three hours
+> ([docs/03](03-chromium-fork.md)).
 >
-> The page is written anyway, and written first, because the instructions are
-> the specification — what a release has to produce is exactly what this page
-> already promises.
+> This page was written before the first release existed, because the
+> instructions are the specification — what a release has to produce is exactly
+> what this page promises. It now describes what the releases do.
 
 For a person who has not built anything. If you want to build from source, that
 is [docs/03](03-chromium-fork.md) and the README; this page assumes you have a
@@ -35,26 +40,34 @@ corrupt download rather than at us.
 
 Download `fury-<version>-macos-<arch>.dmg` from
 [Releases](https://github.com/furyteamtop/fury-antidetect-browser/releases). `arch` is `arm64` for
-any Apple-silicon Mac (M1 and later) and `x86_64` for an Intel one — if you are
-not sure,  → About This Mac says which.
+any Apple-silicon Mac (M1 and later) — if you are not sure,  → About This Mac
+says which. Intel Macs have no release build yet: the name would be `x86_64`,
+and until one is published the way in on an Intel machine is to build it.
 
 Open it and drag **Fury.app** into `/Applications`, the way every other Mac
 application is installed.
 
 ### 2. The browser core
 
-Download `fury-core-<version>-macos-<arch>.tar.xz` from the same page. Then, in
-Terminal:
+Open Fury. It says the browser itself is not installed yet and offers
+**Download the browser** — press it. That fetches the core for this machine
+from the Releases page, about 100 MB, once, and installs it. Nothing runs on a
+timer or at startup: the request is made when you press the button and not
+otherwise, which is the difference between this and the automatic updates the
+project refuses to have (the reasons are at the bottom of this page).
+
+Or by hand: download `fury-core-<version>-macos-<arch>.tar.xz` from the same
+page, then in Terminal:
 
 ```bash
 /Applications/Fury.app/Contents/MacOS/fury-agent install-core ~/Downloads/fury-core-*.tar.xz
 ```
 
-This is the one command that needs a terminal, and it does three things by hand
-that are easy to get wrong: it unpacks the bundle preserving the symlinks a
-macOS framework is built from, it removes the quarantine flag your browser
-attached to the download, and — the step that matters — it **runs the browser
-once and checks it starts**. If it prints a version, it is installed:
+The button runs exactly this. It does three things by hand that are easy to get
+wrong: it unpacks the bundle preserving the symlinks a macOS framework is built
+from, it removes the quarantine flag your browser attached to the download, and
+— the step that matters — it **runs the browser once and checks it starts**.
+If it prints a version, it is installed:
 
 ```
 installed Fury 153.0.8010.37
@@ -128,24 +141,48 @@ in full.
 
 ## Windows
 
-Not yet, and still not "coming soon" — but the sentence is shorter than it was.
+Works, as of 16.08.2026, and in the releases since 0.1.1. An earlier version of
+this section said "not yet" for as long as that was true: the launcher was
+ported first, and the core — the Chromium build — was the part nobody had run on
+a Windows machine. It has been run now, and `tools/verify-windows.ps1` passes
+29 claims against it on a real machine. The same two downloads as on macOS.
 
-The launcher is done: the agent and the desktop shell are ported, and the parts
-that differ per operating system (named pipes instead of a Unix socket, an
-explicit DACL instead of file modes, an inherited HANDLE instead of a file
-descriptor, WM_CLOSE instead of SIGTERM) are compiled for
-`x86_64-pc-windows-msvc` on every commit. The core patches read their config
-from that HANDLE.
+### 1. The application
 
-What is missing is one thing: nobody has run the Chromium build on a Windows
-machine. So there is no Windows core, nothing has been measured on Windows, and
-until a build exists this page will not offer a download. That is the same rule
-the rest of this repository follows — an unmeasured release is a claim.
+Download `fury-<version>-windows-x64-setup.exe` from
+[Releases](https://github.com/furyteamtop/fury-antidetect-browser/releases)
+and run it. **SmartScreen will object** — "Windows protected your PC" — because
+the installer is not signed, not because anything is wrong with it. Press
+**More info**, then **Run anyway**.
 
-If you want to try the launcher against a core you built yourself,
-`tools/verify-windows.ps1` checks the parts a compiler cannot: whether the
-pipe's DACL actually refuses other accounts, whether the config handle survives
-process creation, whether the browser closes cleanly instead of being killed.
+The installer asks for nothing: it installs for the current user, into
+`%LOCALAPPDATA%\Fury`, and needs no administrator password. That directory
+holds `fury-desktop.exe`, `fury-agent.exe` and the uninstaller, and nothing
+else.
+
+### 2. The browser core
+
+Open Fury and press **Download the browser**, the same button as on macOS: it
+fetches `fury-core-<version>-windows-x64.tar.xz` from Releases, about 150 MB,
+once, and installs it. Or by hand — download that file from the same page and,
+in PowerShell:
+
+```powershell
+& "$env:LOCALAPPDATA\Fury\fury-agent.exe" install-core "$env:USERPROFILE\Downloads\fury-core-<version>-windows-x64.tar.xz"
+```
+
+On Windows the install step reads the version out of the executable instead of
+running it: `chrome.exe --version` starts a browser and never exits.
+
+### 3. Open it
+
+Open Fury from the Start menu. Everything the macOS section says about accounts
+applies: there are none until you want a team.
+
+**Widevine** — Netflix, Spotify and the other DRM sites — is not in the
+download, because it cannot be redistributed. The agent stages it out of the
+Chrome already installed on the machine; a machine with no Chrome gets a
+working browser without DRM, and a site that checks for it will notice.
 
 ## Linux
 
@@ -170,10 +207,16 @@ each one operation:
                    shows one Fury rather than two)
 ```
 
+On Windows the same directory is `%APPDATA%\Fury` — Roaming rather than
+Local, deliberately: on a domain-joined machine it follows the user, and
+losing the database on a different machine would look like data loss rather
+than a cache miss.
+
 Set `FURY_HOME` to put it somewhere else — an external disk, or an encrypted
 volume.
 
-To remove Fury completely: delete that directory and `/Applications/Fury.app`.
+To remove Fury completely: delete that directory and `/Applications/Fury.app`
+— on Windows, that directory and Fury from Settings → Apps.
 Nothing is written anywhere else, and nothing is left behind on any server you
 did not set up yourself.
 
