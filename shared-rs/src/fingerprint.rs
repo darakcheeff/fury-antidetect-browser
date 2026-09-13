@@ -336,9 +336,9 @@ impl FingerprintConfig {
         }
 
         // --- Audio ----------------------------------------------------------
-        if ![44100, 48000].contains(&self.audio.sample_rate) {
+        if !crate::persona::AUDIO_SAMPLE_RATES.contains(&self.audio.sample_rate) {
             bad(format!(
-                "unusual AudioContext sampleRate {}; real machines report 44100 or 48000",
+                "AudioContext sampleRate {} is not one a sound device offers",
                 self.audio.sample_rate
             ));
         }

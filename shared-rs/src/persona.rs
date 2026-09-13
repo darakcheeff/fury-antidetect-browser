@@ -22,6 +22,19 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+/// Sample rates a real output device reports through `AudioContext`.
+///
+/// This used to be `[44100, 48000]`, and the first persona anyone sent
+/// through the issue form (#5, a Windows 10 desktop with a GTX 950) was
+/// refused for reporting 192000 — the rate its owner had picked in the Sound
+/// control panel, where Windows offers every value below. The check exists
+/// to catch a number nobody's hardware produces, not a real machine with an
+/// unusual setting: an unusual real value is a small crowd, which is a fact
+/// for the catalogue to state, not for the validator to refuse.
+pub const AUDIO_SAMPLE_RATES: &[u32] = &[
+    8000, 11025, 16000, 22050, 32000, 44100, 48000, 88200, 96000, 176400, 192000,
+];
+
 /// One real machine's measured configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Persona {
@@ -599,9 +612,10 @@ impl Persona {
             ));
         }
 
-        if ![44100, 48000].contains(&self.audio.sample_rate) {
+        if !AUDIO_SAMPLE_RATES.contains(&self.audio.sample_rate) {
             errs.push(format!(
-                "unusual sample rate {}; real machines report 44100 or 48000",
+                "sample rate {} is not one a sound device offers; real machines \
+                 report 44100 or 48000, a studio interface up to 192000",
                 self.audio.sample_rate
             ));
         }
