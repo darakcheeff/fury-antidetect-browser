@@ -99,9 +99,12 @@ the normal result for an unsigned application, and it is what you should expect
 for the *correct* file — an earlier version of this page told you to download it
 again, which was a loop with no exit. Instead:
 
-  1. Right-click (or Control-click) Fury.app and choose **Open**, then **Open**
-     again in the dialog. macOS remembers the choice for that copy.
-  2. If that does not work, strip the quarantine flag:
+  1. Try to open it once and dismiss the dialog. Then System Settings →
+     Privacy & Security, scroll to the bottom: next to *"Fury" was blocked* press
+     **Open Anyway** and confirm. macOS remembers the choice for that copy.
+     (Right-click → **Open** used to be enough; since macOS 15 it is not.)
+  2. Or strip the quarantine flag in Terminal, which is what the dialog is
+     really about:
 
      ```bash
      xattr -dr com.apple.quarantine /Applications/Fury.app
@@ -110,10 +113,13 @@ again, which was a loop with no exit. Instead:
 The same applies to the core: `fury-agent install-core` removes the flag from
 what it unpacks, which is why the core needs no step of its own here.
 
-**"Fury is damaged and should be moved to the Bin."** This one is almost never a
-damaged file. It means the bundle's signature no longer matches its contents —
-most often because something was added to or removed from inside `Fury.app`.
-Delete it and unpack the download again.
+**"Fury is damaged and can't be opened."** On macOS 15 and later this is the
+wording you get for an ad-hoc signed download, so it is the same case as above:
+strip the quarantine flag and it opens. The release 0.1.2 bundle passes
+`codesign --verify --deep --strict` on the machine it was built on, so the
+signature itself is sound. If the message survives the `xattr` step, then the
+seal is genuinely broken — something was added to or removed from inside
+`Fury.app` — and the fix is to delete it and unpack the download again.
 
 **A core you built yourself will not start**, with a message about *Team IDs*.
 That is a signing arrangement rather than a broken build; see

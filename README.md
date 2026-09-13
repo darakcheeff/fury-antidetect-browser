@@ -44,10 +44,20 @@ team. No seats, no per-profile pricing, no telemetry.
 > and unused — [tools/release/sign-core.sh](tools/release/sign-core.sh),
 > [sign-shell.sh](tools/release/sign-shell.sh), [docs/17](docs/17-apple-signing.md).
 >
-> Until it lands: a downloaded macOS build is ad-hoc signed, so Gatekeeper
-> refuses it with "is damaged" — which is about a missing signature and not a
-> corrupt file — and Windows shows a SmartScreen warning. Building from source
-> avoids both. A release is a preview until the certificate exists.
+> Until it lands the downloads still run; they need one extra step. A macOS
+> build is ad-hoc signed, so Gatekeeper refuses it with "is damaged" — which is
+> about the missing Developer ID and not a corrupt file. Drag Fury to
+> Applications and run once:
+>
+> ```bash
+> xattr -dr com.apple.quarantine /Applications/Fury.app
+> ```
+>
+> or, without a terminal: try to open it, then System Settings → Privacy &
+> Security → **Open Anyway**. Windows shows a SmartScreen warning: **More info →
+> Run anyway**. Building from source avoids both. Either way a release is a
+> preview until the certificate exists; [docs/15](docs/15-install.md) walks
+> through it.
 >
 > **Linux** is not a target. See the table at the bottom.
 >
