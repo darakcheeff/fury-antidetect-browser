@@ -32,6 +32,20 @@ So: a check that reads commits rather than files.
 It runs over the whole history because that is cheap at this size and because
 the failure it looks for is one-commit-deep — a single bad commit among a
 hundred good ones is exactly the case a spot check misses.
+
+Two rules, since the first outside contribution landed (13.09.2026):
+
+  1. No identity, anyone's, may be machine-derived. That is the whole point.
+  2. The project's own author commits only as the project identity. A commit
+     under his name with any other address is the slip this file describes.
+
+Everyone else's address is their own affair. A contributor who signs a PR
+with their email has chosen to publish it; GitHub's squash merge writes
+`github-actions[bot]` as author and `GitHub <noreply@github.com>` as
+committer, and neither names a person or a machine. The first version of this
+check demanded the project identity on every commit, which was right for a
+history with one author and wrong the moment there were two: it went red on
+the merge of the first persona anyone sent.
 """
 
 import re
@@ -42,6 +56,10 @@ import sys
 # author does not want a personal email address in a public history, and once
 # published there is no taking it back.
 EXPECTED = "furyteamtop@users.noreply.github.com"
+
+# The names the project's author commits under. A commit carrying one of these
+# with an address other than EXPECTED is the slip the docstring describes.
+OWN_NAMES = {"Bogdan Shapovalov", "furyteamtop"}
 
 # The shapes a machine-derived address takes. `.local` is what macOS appends to
 # a hostname; `.lan`, `.home` and `.internal` are the common router defaults;
@@ -66,18 +84,16 @@ def main() -> int:
             continue
         sha, an, ae, cn, ce = line.split("\0")
         for role, name, email in (("author", an, ae), ("committer", cn, ce)):
-            if email != EXPECTED:
-                why = (
-                    "machine-derived — this names a login and a hostname"
-                    if MACHINE.search(email)
-                    else "not the project identity"
-                )
-                bad.append((sha[:12], role, f"{name} <{email}>", why))
+            if MACHINE.search(email):
+                why = "machine-derived — this names a login and a hostname"
+            elif name in OWN_NAMES and email != EXPECTED:
+                why = "the project's author under a different address"
+            else:
+                continue
+            bad.append((sha[:12], role, f"{name} <{email}>", why))
 
     if bad:
-        print(
-            f"!! {len(bad)} commit identit(ies) are not {EXPECTED}:", file=sys.stderr
-        )
+        print(f"!! {len(bad)} commit identit(ies) fail the check:", file=sys.stderr)
         for sha, role, who, why in bad:
             print(f"     {sha}  {role:9} {who}", file=sys.stderr)
             print(f"                          {why}", file=sys.stderr)
@@ -96,7 +112,10 @@ def main() -> int:
         )
         return 1
 
-    print(f"all {len(log)} commits are authored and committed by {EXPECTED}")
+    print(
+        f"all {len(log)} commits: no machine-derived identity, and the project's "
+        f"author only ever as {EXPECTED}"
+    )
     return 0
 
 
